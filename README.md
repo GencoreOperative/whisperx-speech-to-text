@@ -1,80 +1,52 @@
 # Overview
 
-This is a Docker project to enable command line access to the [WhisperX](https://github.com/m-bain/whisperX) 
-library. This library is an optimisation on top of the original work done by OpenAI with their Whisper project.
+This is a Docker project to enable command line access to the [WhisperX](https://github.com/m-bain/whisperX)
+library. This library is an optimisation on top of the original work done by [OpenAI for Whisper](https://openai.com/index/whisper/).
 
-Whisper is a neural network that has been trained to achieve human levels of robustness and accuracy 
-on English speech recognition. Any-to-English translation is supported as well. WhisperX expands on 
-this by improving the speed of transcription, as well as adding features for automatic language 
-detection and word-level subtitling.
+> Whisper is a neural network that has been trained to achieve human levels of robustness and accuracy on English speech recognition. Any-to-English translation is supported as well. WhisperX expands on this by improving the speed of transcription, as well as adding features for automatic language detection and word-level subtitling.
 
-Initial testing for a 4 minute 20 second video:
+Initial testing for a 4 minute 20 seconds video:
 - Whisper: 7 minutes 20 seconds
 - WhisperX: 1 minute 15 seconds
 
 ## Project Details
 
-This project makes use of the [OpenAI Python](https://pypi.org/project/openai-whisper) binding for their 
-Whisper API. Credit goes to [linuxlinks](https://www.linuxlinks.com/machine-learning-linux-whisper-automatic-speech-recognition-system) for the write up that explains how to install all of this.
+Like Whisper, WhisperX is also packaged as a [Python project](https://pypi.org/project/whisperx/). All dependencies required to run the model are included in this Docker image.
 
-the `whisper` utility supports both transcribe and translate features.
+## Transcription
 
-# Run
+The primary use case I wanted to solve for this project was to take a recording of a meeting and generate the transcription of the spoken audio. This is then stored as subtitles on the video. Once we have the subtitles of a video, we can use that for multiple downstream AI processing tasks like creating meeting minutes.
 
-```
-curl https://raw.githubusercontent.com/GencoreOperative/whisper-speech-to-text/master/toTxt
-```
+WhisperX also supports translation which might be interesting in the future. English is supported for the moment, and other languages are available. See the `help.txt` file for more options to learn about the advanced options.
 
-To run the project, you can use the provided script with any media file.
-
-```
-toTxt recording.mp3
-```
+The Docker image will support video and audio file formats. The transcription will be stored in audio.txt. If a video file format is provided, then the subtitles will be included in the video.
 
 # Build
 
-Build the project using the provided Makefile. This will need to download around 11GB of dependencies.
+A makefile has been provided for all operations:
 
 ```
 make build
 ```
 
+# Run - Quick
 
+The simplest way to run the project is to use the provided shell script `subtitlex` which is included in this project.
 
-in the form of an MP3 file. Therefore, this project also includes FFMPEG to enable the user to provide input in audio and video formats.
+```
+curl https://raw.githubusercontent.com/GencoreOperative/whisperx-speech-to-text/main/subtitlex
+bash subtitles <my-video-file.mp4>
+```
 
-TODO - Input
+# Run - Advanced
 
-TODO - Output
-
-# Limitations
-
-> However, because the models are trained in a weakly supervised manner using large-scale noisy data, the predictions may include texts that are not actually spoken in the audio input (i.e. hallucination). We hypothesize that this happens because, given their general knowledge of language, the models combine trying to predict the next word in audio with trying to transcribe the audio itself.
-
-
-
-
-
-
-https://github.com/openai/whisper/blob/main/model-card.md
-Model card details the limitiations which we should copy.
-
-There is a related [Python API](https://pypi.org/project/openai-whisper/20230314/) available using this project as well.
-
-
-
-
-It will output the following:
-
-# Detail
-
-
-docker run -v "$PWD:/audio" --rm -ti gencore/whisper-speech-to-text:latest counting.mp3
-
-# Use Case: Add Subtitles
-
-docker run -v "$PWD:/audio" --rm -ti gencore/whisper-speech-to-text:latest video.mp3; ffmpeg -i video.mp4 -i video.srt -c copy -c:s mov_text -metadata:s:s:0 language=eng video-subtitle.mp4
-
+The Docker image supports the following command line arguments:
+```
+  <input>: Required. A media file that must exist.
+  --output, -o: Optional output file to store the output video. If no file name is provided, then one will be generated.
+  --bake, -b: Optional. Bake-in selector flag that will cause the subtitles to be baked into the video.
+  --help, -h: Display this help message."
+```
 # License
 
-OpenAI have licensed their code and model under [MIT](https://github.com/openai/whisper/blob/main/LICENSE). Similarly, this project is licensed under the same MIT license.
+OpenAI has licensed their code and model under [MIT](https://github.com/openai/whisper/blob/main/LICENSE). Similarly, this project is licensed under the same MIT license.
