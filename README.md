@@ -34,8 +34,8 @@ make build
 The simplest way to run the project is to use the provided shell script `subtitlex` which is included in this project.
 
 ```
-curl https://raw.githubusercontent.com/GencoreOperative/whisperx-speech-to-text/main/subtitlex
-bash subtitles <my-video-file.mp4>
+curl -o subtitlex https://raw.githubusercontent.com/GencoreOperative/whisperx-speech-to-text/main/subtitlex
+bash subtitlex <my-video-file.mp4>
 ```
 
 # Run - Advanced
