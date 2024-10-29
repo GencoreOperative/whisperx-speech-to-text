@@ -86,6 +86,7 @@ ffmpeg -i "$SOURCE" \
 cd /audio && whisperx \
 	--compute_type int8 \
 	--output_format all \
+	--language en \
 	$AUDIO
 
 # If the source was a Video file, convert into the target MP4 file 
