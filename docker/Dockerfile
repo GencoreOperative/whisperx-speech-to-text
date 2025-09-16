@@ -35,7 +35,9 @@ RUN pip install backports.tarfile
 WORKDIR /tmp
 COPY counting.mp3 /tmp/counting.mp3
 
-RUN whisperx --compute_type int8 counting.mp3
+ARG MODEL_SIZE
+RUN echo "${MODEL_SIZE}" > /etc/model_size
+RUN whisperx --model ${MODEL_SIZE} --compute_type int8 counting.mp3
 
 ADD entrypoint.sh /
 

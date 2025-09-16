@@ -83,7 +83,9 @@ ffmpeg -i "$SOURCE" \
 # -----------------------------------------------
 # This will generate the multiple output files including the subtitle file.
 # Note: https://github.com/openai/whisper/discussions/301 provided the tip on FP16 mode
+MODEL_SIZE=$(cat /etc/model_size)
 cd /audio && whisperx \
+	--model ${MODEL_SIZE} \
 	--compute_type int8 \
 	--output_format all \
 	--language en \
