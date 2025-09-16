@@ -24,10 +24,11 @@ RUN pip install --no-deps nvidia_cusparse_cu12==12.3.1.170
 RUN pip install --no-deps nvidia_nccl_cu12==2.21.5
 RUN pip install --no-deps nvidia_cusolver_cu12==11.6.1.9
 RUN pip install --no-deps nvidia_cufft_cu12==11.2.1.3
-RUN pip install --no-deps torch==2.5.0
+RUN pip install --no-deps torch==2.6.0
+RUN pip install --no-deps torch==2.5.1
 
 # Then the project
-RUN pip install whisperx==3.1.3
+RUN pip install whisperx==3.3.2
 RUN pip install backports.tarfile
 
 # Exercise the program as part of build to pre-cache dependencies
