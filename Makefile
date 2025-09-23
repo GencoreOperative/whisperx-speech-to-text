@@ -1,6 +1,6 @@
 project=gencore/whisperx-speech-to-text
 git = $(shell git rev-parse --short HEAD)
-whisper = 3.3.2
+whisper = 3.4.2
 models = small medium large-v3
 
 all: build
@@ -11,7 +11,7 @@ build:
 	@echo "Building the WhisperX images"
 	for model in $(models); do \
 		echo "Building WhisperX Model: $$model"; \
-		docker build docker2 \
+		DOCKER_BUILDKIT=1 docker build docker2 \
 			--build-arg MODEL_SIZE=$$model \
 			--build-arg WHISPER_VERSION=$(whisper) \
 			--tag $(project):$(whisper)-$$model; \
