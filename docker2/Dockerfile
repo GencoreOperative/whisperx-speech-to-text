@@ -35,25 +35,24 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     whisperx==${WHISPER_VERSION} --no-deps
 
-# Pre-cache the model that the Docker image will use.
-# The model size will be part of the image tag, and allow the user to control
-# quality versus size of image download.
-WORKDIR /tmp
-COPY counting.mp3 /tmp/counting.mp3
-ARG MODEL_SIZE
-RUN echo "${MODEL_SIZE}" > /etc/model_size && \
-    whisperx \
-    --model ${MODEL_SIZE} \
-    --compute_type int8 \
-    --no_align \
-    counting.mp3
-
 # Fixing the warning: Lightning automatically upgraded your loaded checkpoint from v1.5.4 to v2.5.5
 # We need to use the --map-to-cpu flag to ensure this works when we are in CPU only mode.
 RUN python -m pytorch_lightning.utilities.upgrade_checkpoint \
         --map-to-cpu \
         /usr/local/lib/python3.11/site-packages/whisperx/assets/pytorch_model.bin \
     && echo "Checkpoint upgraded to Lightning v2.5.5 (CPU-safe)"
+
+# Pre-cache the model that the Docker image will use.
+# The model size will be part of the image tag, and allow the user to control
+# quality versus size of image download.
+WORKDIR /tmp
+COPY jfk.wav /tmp/
+ARG MODEL_SIZE
+RUN echo "${MODEL_SIZE}" > /etc/model_size && \
+    whisperx \
+    --model ${MODEL_SIZE} \
+    --compute_type int8 \
+    jfk.wav
 
 # Entrypoint for argument processing.
 ADD entrypoint.sh /
