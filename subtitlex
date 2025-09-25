@@ -66,7 +66,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 [ -z "$INPUT" ] && echo "Error: No input video file provided." && usage
-[ -z "$TARGET" ] && TARGET="subtitle-$INPUT"
+[ -z "$TARGET" ] && TARGET="subtitle-$(basename "$INPUT")"
 
 # Default model size to small if not specified
 if [ -z "$SIZE" ]; then
@@ -90,5 +90,6 @@ case $SIZE in
         ;;
 esac
 
+mkdir -p "$(dirname "$TARGET")"
 touch "$TARGET"
-docker run -v "$PWD:/audio" --rm -ti $MODEL_TAG $BAKE --output "$TARGET" "$INPUT"
+docker run -v "$PWD":/audio --rm -i $MODEL_TAG $BAKE --output "$TARGET" "$INPUT"
