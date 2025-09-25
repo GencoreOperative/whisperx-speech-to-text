@@ -1,10 +1,41 @@
 #!/bin/bash
 
-# A script to both convert a given video file into a video file with subtitles.
+# A script to add subtitles to a video.
+# The main controls we want to provide the user are:
+# - Bake mode (optional)
+# - Model size
+
 INPUT="$1"
-[ ! -f "$INPUT" ] && echo "Provide an input audio/video file" && exit 1
+[ ! -f "$INPUT" ] && echo "Provide an input video file" && exit 1
 TARGET="subtitle-$INPUT"
 
+# Parse arguments
+BAKE=""
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --output|-o)
+            TARGET="$2"
+            VIDEO=true
+            shift
+            ;;
+        --bake|-b)
+            BAKE="--bake"
+            ;;
+        --model|-m)
+            SIZE="$2"
+            shift
+            ;;
+        *)
+            if [ -z "$SOURCE" ]; then
+                SOURCE="$1"
+            else
+                echo "Unknown parameter: $1"
+                usage
+            fi
+            ;;
+    esac
+    shift
+done
+
 touch "$TARGET"
-touch audio.srt audio.txt
-docker run -v "$PWD:/audio" --rm -ti gencore/whisperx-speech-to-text -o "$TARGET" "$INPUT"
+docker run -v "$PWD:/audio" --rm -ti gencore/whisperx-speech-to-text $BAKE --output "$TARGET" "$INPUT"
