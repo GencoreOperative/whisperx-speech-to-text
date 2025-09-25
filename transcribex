@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# A script to transcribe an audio/video file using WhisperX.
+
+usage() {
+    echo "Usage: $0 [OPTIONS] <input_file>"
+    echo "Transcribe an audio or video file using WhisperX."
+    echo ""
+    echo "Arguments:"
+    echo "  <input_file>         The audio or video file to process."
+    echo ""
+    echo "Options:"
+    echo "  -o, --output <file>  Specify the output file name (default: STDOUT)"
+    echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
+    echo "  -h, --help           Display this help message"
+    echo ""
+    echo "Example:"
+    echo "  $0 --model medium my_audio.mp3"
+    echo "  $0 -o transcript.txt my_video.mp4"
+    exit 1
+}
+
+INPUT=""
+OUTPUT=""
+SIZE=""
+
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --output|-o)
+            OUTPUT="$2"
+            shift
+            shift
+            ;;
+        --model|-m)
+            SIZE="$2"
+            shift
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            usage
+            ;;
+        *)
+            if [ -z "$INPUT" ]; then
+                INPUT="$1"
+            else
+                echo "Unknown parameter: $1"
+                usage
+            fi
+            shift
+            ;;
+    esac
+done
+
+[ -z "$INPUT" ] && echo "Error: No input file provided." && usage
+
+# Default model size to small if not specified
+if [ -z "$SIZE" ]; then
+    SIZE="small"
+fi
+
+# Set the model tag based on the size
+case $SIZE in
+    small)
+        MODEL_TAG="gencore/whisperx-speech-to-text:small"
+        ;;
+    medium)
+        MODEL_TAG="gencore/whisperx-speech-to-text:medium"
+        ;;
+    large)
+        MODEL_TAG="gencore/whisperx-speech-to-text:large-v3"
+        ;;
+    *)
+        echo "Invalid model size: $SIZE. Please use small, medium, or large."
+        exit 1
+        ;;
+esac
+
+if [ -z "$OUTPUT" ]; then
+    docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT"
+else
+    docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT
+fi
