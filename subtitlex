@@ -5,37 +5,90 @@
 # - Bake mode (optional)
 # - Model size
 
-INPUT="$1"
-[ ! -f "$INPUT" ] && echo "Provide an input video file" && exit 1
-TARGET="subtitle-$INPUT"
+usage() {
+    echo "Usage: $0 [OPTIONS] <input_video_file>"
+    echo "Add subtitles to a video file using WhisperX."
+    echo ""
+    echo "Arguments:"
+    echo "  <input_video_file>   The video file to process."
+    echo ""
+    echo "Options:"
+    echo "  -o, --output <file>  Specify the output file name (default: subtitle-<input_video_file>)"
+    echo "  -b, --bake           Bake subtitles directly into the video"
+    echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
+    echo "  -h, --help           Display this help message"
+    echo ""
+    echo "Example:"
+    echo "  $0 my_video.mp4"
+    echo "  $0 -b -o output.mp4 input.mp4"
+    exit 1
+}
+
+INPUT=""
+TARGET=""
+BAKE=""
+SIZE=""
 
 # Parse arguments
-BAKE=""
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --output|-o)
             TARGET="$2"
-            VIDEO=true
+            shift
             shift
             ;;
         --bake|-b)
             BAKE="--bake"
+            shift
             ;;
         --model|-m)
             SIZE="$2"
             shift
+            shift
+            ;;
+        --help|-h)
+            usage
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            usage
             ;;
         *)
-            if [ -z "$SOURCE" ]; then
-                SOURCE="$1"
+            if [ -z "$INPUT" ]; then
+                INPUT="$1"
             else
                 echo "Unknown parameter: $1"
                 usage
             fi
+            shift
             ;;
     esac
-    shift
 done
 
+[ -z "$INPUT" ] && echo "Error: No input video file provided." && usage
+[ -z "$TARGET" ] && TARGET="subtitle-$INPUT"
+
+# Default model size to small if not specified
+if [ -z "$SIZE" ]; then
+    SIZE="small"
+fi
+
+# Set the model tag based on the size
+case $SIZE in
+    small)
+        MODEL_TAG="gencore/whisperx-speech-to-text:small"
+        ;;
+    medium)
+        MODEL_TAG="gencore/whisperx-speech-to-text:medium"
+        ;;
+    large)
+        MODEL_TAG="gencore/whisperx-speech-to-text:large-v3"
+        ;;
+    *)
+        echo "Invalid model size: $SIZE. Please use small, medium, or large."
+        exit 1
+        ;;
+esac
+
 touch "$TARGET"
-docker run -v "$PWD:/audio" --rm -ti gencore/whisperx-speech-to-text $BAKE --output "$TARGET" "$INPUT"
+docker run -v "$PWD:/audio" --rm -ti $MODEL_TAG $BAKE --output "$TARGET" "$INPUT"
