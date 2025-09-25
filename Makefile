@@ -28,11 +28,18 @@ build:
 
 clean:
 	@echo "Cleaning up Docker images"
-	docker rmi -f $(project):$(whisper)
+	for model in $(models); do \
+		docker rmi -f $(project):$(whisper)-$$model-$(git); \
+		docker rmi -f $(project):$(whisper)-$$model; \
+		docker rmi -f $(project):$$model; \
+	done
 	docker rmi -f $(project):latest
 
 publish:
 	@echo "Pushing to DockerHub"
 	@sh utils/docker-login
-	docker push $(project):$(whisper)
+	for model in $(models); do \
+		docker push $(project):$(whisper)-$$model; \
+		docker push $(project):$$model; \
+	done
 	docker push $(project):latest
