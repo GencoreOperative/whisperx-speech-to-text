@@ -74,15 +74,16 @@ if [ -z "$SIZE" ]; then
 fi
 
 # Set the model tag based on the size
+DOCKER_IMAGE="gencore/whisperx-speech-to-text"
 case $SIZE in
     small)
-        MODEL_TAG="gencore/whisperx-speech-to-text:small"
+        MODEL_TAG="${DOCKER_IMAGE}:small"
         ;;
     medium)
-        MODEL_TAG="gencore/whisperx-speech-to-text:medium"
+        MODEL_TAG="${DOCKER_IMAGE}:medium"
         ;;
     large)
-        MODEL_TAG="gencore/whisperx-speech-to-text:large-v3"
+        MODEL_TAG="${DOCKER_IMAGE}:large-v3"
         ;;
     *)
         echo "Invalid model size: $SIZE. Please use small, medium, or large."

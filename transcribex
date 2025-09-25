@@ -12,6 +12,7 @@ usage() {
     echo "Options:"
     echo "  -o, --output <file>  Specify the output file name (default: STDOUT)"
     echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
+    echo "  -q, --quiet          Suppress STDERR output from the docker image"
     echo "  -h, --help           Display this help message"
     echo ""
     echo "Example:"
@@ -23,6 +24,7 @@ usage() {
 INPUT=""
 OUTPUT=""
 SIZE=""
+QUIET=false
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -35,6 +37,10 @@ while [[ "$#" -gt 0 ]]; do
         --model|-m)
             SIZE="$2"
             shift
+            shift
+            ;;
+        -q|--quiet)
+            QUIET=true
             shift
             ;;
         --help|-h)
@@ -64,15 +70,16 @@ if [ -z "$SIZE" ]; then
 fi
 
 # Set the model tag based on the size
+DOCKER_IMAGE="gencore/whisperx-speech-to-text"
 case $SIZE in
     small)
-        MODEL_TAG="gencore/whisperx-speech-to-text:small"
+        MODEL_TAG="${DOCKER_IMAGE}:small"
         ;;
     medium)
-        MODEL_TAG="gencore/whisperx-speech-to-text:medium"
+        MODEL_TAG="${DOCKER_IMAGE}:medium"
         ;;
     large)
-        MODEL_TAG="gencore/whisperx-speech-to-text:large-v3"
+        MODEL_TAG="${DOCKER_IMAGE}:large-v3"
         ;;
     *)
         echo "Invalid model size: $SIZE. Please use small, medium, or large."
@@ -80,8 +87,16 @@ case $SIZE in
         ;;
 esac
 
-if [ -z "$OUTPUT" ]; then
-    docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT"
+if [ "$QUIET" = "true" ]; then
+    if [ -z "$OUTPUT" ]; then
+        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" 2>/dev/null
+    else
+        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT 2>/dev/null
+    fi
 else
-    docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT
+    if [ -z "$OUTPUT" ]; then
+        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT"
+    else
+        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT
+    fi
 fi
