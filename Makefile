@@ -1,6 +1,11 @@
 project=gencore/whisperx-speech-to-text
+
 git = $(shell git rev-parse --short HEAD)
+
+# WhisperX versions from: https://pypi.org/project/whisperx/#history
 whisper = 3.4.2
+
+# Model sizes are based on the OpenAI released models: https://huggingface.co/openai/whisper-large-v3#model-details
 models = small medium large-v3
 
 all: build
@@ -14,10 +19,12 @@ build:
 		DOCKER_BUILDKIT=1 docker build docker2 \
 			--build-arg MODEL_SIZE=$$model \
 			--build-arg WHISPER_VERSION=$(whisper) \
-			--tag $(project):$(whisper)-$$model; \
+			--tag $(project):$(whisper)-$$model-$(git) \
+			--tag $(project):$(whisper)-$$model \
+			--tag $(project):$$model; \
 	done
 	@echo "Tagging the 'small' model as latest"
-	docker tag $(project):$(whisper)-small $(project):latest
+	docker tag $(project):$(whisper)-small-$(git) $(project):latest
 
 clean:
 	@echo "Cleaning up Docker images"
