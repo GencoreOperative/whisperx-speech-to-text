@@ -6,11 +6,24 @@ set -e
 # See the help information for the arguents.
 
 # Help message
-HELP_MESSAGE="Usage: $0 <input> [--output <output>] [--bake] [--help]
+HELP_MESSAGE="
+By default, the command will perform audio transcript of the provided media. 
+Media that is not in MP3 format will be converted first. The transcription 
+will be output to STDOUT.
+
+If the --output argument is provided, and the input is a video, then an MP4 
+video will be created that contains the transcription as a subtitle track. 
+Lastly, if the --bake option is included, then the subtitles will be drawn 
+on top of the video stream (hardsubs).
+
+Usage: $0 <input> [--output <output>] [--bake] [--help]
   <input>: Required. A media file that must exist.
-  --output, -o: Optional output file to store the output video. If no file name is provided, then one will be generated.
-  --bake, -b: Optional. Bake-in selector flag that will cause the subtitles to be baked into the video.
-  --help, -h: Display this help message."
+  --output, -o: Optional. When provided with a video, an MP4 will be created 
+                that has subtitles from the transcript.
+  --bake,   -b: Optional. Used with --output. When generating a video, rather 
+                than a separate subtitle track, the subtitles will be drawn 
+                over the video.
+  --help,   -h: Display this help message."
 
 # Function to display usage information
 usage() {
@@ -61,23 +74,18 @@ if [ ! -f "$SOURCE" ]; then
     usage
 fi
 
-# Generate default output file name if not provided
-if [ -z "$TARGET" ]; then
-    TARGET=$(dirname "$SOURCE")/subtitle-$(basename "$SOURCE")
-fi
-
 # -----------------------------------------------
-# Extract the audio from the video so Whisper can
-# listen to it.
+# Audio Extraction
+# Convert the provided media into WAV format.
 # -----------------------------------------------
-# Even if the source is an MP3 file, we need to create
-# to ensure that the AUDIO is a fixed name. This helps
-# the downstream stages of processing.
+# The generated audio must be in a fixed location for the next stage of processing.
 
 SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
-AUDIO=/tmp/audio.mp3
-if [ "$SOURCE_EXTENSION" = "mp3" ]; then
-	cp "$SOURCE" /tmp/audio.mp3
+AUDIO=/tmp/audio.wav
+
+# Simple short-circuit for WAV content
+if [ "$SOURCE_EXTENSION" = "wav" ]; then
+	cp "$SOURCE" $AUDIO
 else
 	ffmpeg -i "$SOURCE" \
 	-ar 44100 \
@@ -127,7 +135,7 @@ cd /audio && whisperx \
 	$AUDIO >&2
 
 # If the source was a Video file, convert into the target MP4 file 
-# with the subtitle track included. If the mode flag was set, then
+# with the subtitle track included. If the bake flag was set, then
 # instead, bake the subtitles into the video stream.
 SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
 VIDEO_EXTENSIONS=("mp4" "avi" "mkv" "mov" "wmv" "flv" "webm" "m4v" "mpg" "mpeg" "3gp")
