@@ -74,13 +74,33 @@ if [ ! -f "$SOURCE" ]; then
     usage
 fi
 
+SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
+
+# If the user has specified an output file, then we need to ensure that the
+# input file is a video file.
+if [ "$VIDEO" == "true" ]; then
+    VIDEO_EXTENSIONS=("mp4" "avi" "mkv" "mov" "wmv" "flv" "webm" "m4v" "mpg" "mpeg" "3gp")
+    IS_VIDEO=false
+    for VIDEO_EXTENSION in "${VIDEO_EXTENSIONS[@]}"; do
+        if [ "$SOURCE_EXTENSION" == "$VIDEO_EXTENSION" ]; then
+            IS_VIDEO=true
+            break
+        fi
+    done
+
+    if [ "$IS_VIDEO" == "false" ]; then
+        echo "When using --output, the input file must be a video file. The following"
+        echo "extensions are supported: ${VIDEO_EXTENSIONS[@]}"
+        usage
+    fi
+fi
+
 # -----------------------------------------------
 # Audio Extraction
 # Convert the provided media into WAV format.
 # -----------------------------------------------
 # The generated audio must be in a fixed location for the next stage of processing.
 
-SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
 AUDIO=/tmp/audio.wav
 
 # Simple short-circuit for WAV content
@@ -137,44 +157,29 @@ cd /audio && whisperx \
 # If the source was a Video file, convert into the target MP4 file 
 # with the subtitle track included. If the bake flag was set, then
 # instead, bake the subtitles into the video stream.
-SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
-VIDEO_EXTENSIONS=("mp4" "avi" "mkv" "mov" "wmv" "flv" "webm" "m4v" "mpg" "mpeg" "3gp")
-
-for VIDEO_EXTENSION in "${VIDEO_EXTENSIONS[@]}"; do
-    if [ "$SOURCE_EXTENSION" == "$VIDEO_EXTENSION" ]; then
-    	
-		# If the caller provides the 'bake-in flag' then we need
-		# to remove the instruction to add a new subtitle track
-		# and instead let FFMPEG bake the subtitles into the video
-		# stream.
-
-		if [ "$BAKE" == "true" ]; then
-			ffmpeg -i "$SOURCE" \
-				-y \
-				-vf subtitles=/tmp/audio.srt \
-	    		-c:v libx264 \
-				-profile:v high \
-				-crf 22 \
-				-strict experimental \
-				-c:a aac \
-				-q:a 6 \
-				-filter:a dynaudnorm \
-				-c:s mov_text \
-	    		"$TARGET" >&2
-		else
-			# https://superuser.com/questions/700082/is-there-an-option-in-ffmpeg-to-specify-a-subtitle-track-that-should-be-shown-by
-			# Provided detail on the subtitle commands
-			ffmpeg -i "$SOURCE" \
-				-y \
-				-i /tmp/audio.srt \
-				-c:v copy \
-				-c:a copy \
-				-c:s mov_text \
-    			-metadata:s:s:0 language=eng \
-    			-disposition:s:0 default \
-    			"$TARGET" >&2
-		fi
-
-        break
-    fi
-done
+if [ "$BAKE" == "true" ]; then
+	ffmpeg -i "$SOURCE" \
+		-y \
+		-vf subtitles=/tmp/audio.srt \
+		-c:v libx264 \
+		-profile:v high \
+		-crf 22 \
+		-strict experimental \
+		-c:a aac \
+		-q:a 6 \
+		-filter:a dynaudnorm \
+		-c:s mov_text \
+		"$TARGET" >&2
+else
+	# https://superuser.com/questions/700082/is-there-an-option-in-ffmpeg-to-specify-a-subtitle-track-that-should-be-shown-by
+	# Provided detail on the subtitle commands
+	ffmpeg -i "$SOURCE" \
+		-y \
+		-i /tmp/audio.srt \
+		-c:v copy \
+		-c:a copy \
+		-c:s mov_text \
+		-metadata:s:s:0 language=eng \
+		-disposition:s:0 default \
+		"$TARGET" >&2
+fi
