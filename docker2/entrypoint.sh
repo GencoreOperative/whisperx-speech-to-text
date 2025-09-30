@@ -129,6 +129,7 @@ MODEL_SIZE=$(cat /etc/model_size)
 # -----------------------------------------------
 if [ "$VIDEO" == "false" ]; then
 	cd /audio && whisperx \
+	  --threads $(nproc) \
 	  --model ${MODEL_SIZE} \
 	  --compute_type int8 \
 	  --output_format txt \
