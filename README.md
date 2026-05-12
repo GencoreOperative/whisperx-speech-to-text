@@ -16,10 +16,10 @@ Like Whisper, WhisperX is also packaged as a [Python project](https://pypi.org/p
 
 When running the main steps are:
 
-- (If required) convert media to WAV
+- Read media from STDIN
+- Convert to 16kHz mono WAV for WhisperX
 - Perform transcription using whisperx
-- (If required) output to STDOUT
-- (alternatively) include subtitles in video
+- Stream transcript to STDOUT, or stream a subtitled MP4 to STDOUT
 
 ## WhisperX
 
@@ -46,19 +46,19 @@ The Docker image is designed to provide simple command line access to a high qua
 
 To help with this, two modes of operation are provided. One for simple transcription and the other for attaching those transcrptions to a video as subtitles.
 
-In either mode, a `--model` argument is provided to allow the user to control the quality of the model selected.
+In either mode, a `--model` argument is provided to the wrapper scripts (`transcribex`, `subtitlex`) to select which pre-built Docker image to use.
 
 ## Mode: Transcription
 
-This mode is the simplest. Given a media file with spoken audio in it, the Docker image will produce a transcription to the STDOUT.
+This mode is the simplest. Given any media file with spoken audio piped on STDIN, the Docker image will produce a transcription on STDOUT.
 
-The Docker image will support video and audio file formats. The transcription will be sent to STDOUT unless a `--output` file argument is provided.
+Both video and audio file formats are supported.
 
 ## Mode: Subtitles
 
-This mode will take an input video file and then generate the transcription. The mode is triggered when the `--output` file is defined. In this mode the output video will contain a subtitle track that includes the transcription.
+This mode takes an input video piped on STDIN and generates a transcription. The mode is triggered by the `--output` flag. The output is a fragmented MP4 video written to STDOUT, containing the transcription as a subtitle track.
 
-In addition, a `--bake` flag is included that will overlay the subtitles into the vido track.
+In addition, a `--bake` flag is included that will burn the subtitles into the video track (hardsubs).
 
 # Run - Quick
 
@@ -101,12 +101,12 @@ docker run --rm -i gencore/whisperx-speech-to-text --output --bake < my-video-fi
 ## STDOUT/STDERR
 
 The Docker image makes use of both `STDOUT` and `STDERR` outputs when running:
-- `STDOUT`: Used for the transcription output
+- `STDOUT`: Used for the transcript text (transcription mode) or the MP4 video bytes (subtitle mode)
 - `STDERR`: Used for debugging output including FFMPEG and WhisperX output
 
 For this reason, it is important to not use the docker run `-t` argument (Pseudo TTY) as this will combine both output streams into a single stream.
 
-A `--quiet` argument is provided for both scripts to only show the STDERR output.
+A `--quiet` argument is provided for the `transcribex` script to suppress STDERR output (FFMPEG and WhisperX progress), showing only the transcript on STDOUT.
 
 # License
 
