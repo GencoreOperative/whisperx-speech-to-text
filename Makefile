@@ -33,7 +33,7 @@ build:
 	@echo "Building the WhisperX images"
 	$(foreach model,$(models), \
 		echo "Building WhisperX Model: $(model)"; \
-		DOCKER_BUILDKIT=1 docker build docker2 \
+		DOCKER_BUILDKIT=1 docker build docker \
 			--build-arg MODEL_SIZE=$(model) \
 			--build-arg WHISPER_VERSION=$(whisper) \
 			$(foreach tag,$(call tags_for_model,$(model)),--tag $(tag)) ; \
