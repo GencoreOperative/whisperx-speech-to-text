@@ -87,16 +87,29 @@ case $SIZE in
         ;;
 esac
 
+CONTAINER_NAME="transcribex-$$"
+
+cleanup() {
+    docker stop "$CONTAINER_NAME" 2>/dev/null
+    wait "$DOCKER_PID" 2>/dev/null
+    exit 130
+}
+trap cleanup INT TERM
+
+DOCKER_RUN=(docker run --name "$CONTAINER_NAME" --rm -e PYTHONUNBUFFERED=1 -v "$PWD:/audio" -i "$MODEL_TAG")
+
 if [ "$QUIET" = "true" ]; then
     if [ -z "$OUTPUT" ]; then
-        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" 2>/dev/null
+        "${DOCKER_RUN[@]}" "$INPUT" 2>/dev/null &
     else
-        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT 2>/dev/null
+        "${DOCKER_RUN[@]}" "$INPUT" > "$OUTPUT" 2>/dev/null &
     fi
 else
     if [ -z "$OUTPUT" ]; then
-        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT"
+        "${DOCKER_RUN[@]}" "$INPUT" &
     else
-        docker run -v "$PWD:/audio" --rm -i $MODEL_TAG "$INPUT" > $OUTPUT
+        "${DOCKER_RUN[@]}" "$INPUT" > "$OUTPUT" &
     fi
 fi
+DOCKER_PID=$!
+wait $DOCKER_PID

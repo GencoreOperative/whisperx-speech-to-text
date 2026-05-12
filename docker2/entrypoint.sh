@@ -103,15 +103,14 @@ fi
 
 AUDIO=/tmp/audio.wav
 
-# Simple short-circuit for WAV content
-if [ "$SOURCE_EXTENSION" = "wav" ]; then
-	cp "$SOURCE" $AUDIO
-else
-	ffmpeg -i "$SOURCE" \
-	-ar 44100 \
+# Convert all input to 16kHz mono WAV (WhisperX's native format).
+# This also applies dynamic audio normalisation for consistent transcription quality,
+# and ensures WAV files with wrong sample rates or channel counts are fixed.
+ffmpeg -i "$SOURCE" \
+	-ar 16000 \
+	-ac 1 \
 	-filter:a dynaudnorm \
 	$AUDIO >&2
-fi
 
 # -----------------------------------------------
 # Whisper Transcription
@@ -136,6 +135,7 @@ if [ "$VIDEO" == "false" ]; then
 	  --output_dir /tmp \
 	  --language en \
 	  --no_align \
+	  --print_progress True \
 	  $AUDIO >&2
 	cat /tmp/audio.txt
 	exit
@@ -153,6 +153,7 @@ cd /audio && whisperx \
 	--output_format srt \
 	--output_dir /tmp \
 	--language en \
+	--print_progress True \
 	$AUDIO >&2
 
 # If the source was a Video file, convert into the target MP4 file 
