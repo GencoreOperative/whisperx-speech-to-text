@@ -92,5 +92,4 @@ case $SIZE in
 esac
 
 mkdir -p "$(dirname "$TARGET")"
-touch "$TARGET"
-docker run -v "$PWD":/audio --rm -i $MODEL_TAG $BAKE --output "$TARGET" "$INPUT"
+cat "$INPUT" | docker run --rm -i "$MODEL_TAG" --output $BAKE > "$TARGET"

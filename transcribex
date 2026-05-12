@@ -96,19 +96,19 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-DOCKER_RUN=(docker run --name "$CONTAINER_NAME" --rm -e PYTHONUNBUFFERED=1 -v "$PWD:/audio" -i "$MODEL_TAG")
+DOCKER_RUN=(docker run --name "$CONTAINER_NAME" --rm -e PYTHONUNBUFFERED=1 -i "$MODEL_TAG")
 
 if [ "$QUIET" = "true" ]; then
     if [ -z "$OUTPUT" ]; then
-        "${DOCKER_RUN[@]}" "$INPUT" 2>/dev/null &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" 2>/dev/null &
     else
-        "${DOCKER_RUN[@]}" "$INPUT" > "$OUTPUT" 2>/dev/null &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" > "$OUTPUT" 2>/dev/null &
     fi
 else
     if [ -z "$OUTPUT" ]; then
-        "${DOCKER_RUN[@]}" "$INPUT" &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" &
     else
-        "${DOCKER_RUN[@]}" "$INPUT" > "$OUTPUT" &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" > "$OUTPUT" &
     fi
 fi
 DOCKER_PID=$!

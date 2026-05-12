@@ -73,29 +73,29 @@ bash transcribex <my-video-file.mp4>
 
 The Docker image supports the following command line arguments:
 ```
-By default, the command will perform audio transcript of the provided media. 
-Media that is not in MP3 format will be converted first. The transcription 
-will be output to STDOUT.
+Media is read from STDIN. By default, the transcript is written to STDOUT.
 
-If the --output argument is provided, and the input is a video, then an MP4 
-video will be created that contains the transcription as a subtitle track. 
-Lastly, if the --bake option is included, then the subtitles will be drawn 
-on top of the video stream (hardsubs).
+If --output is provided, the input must be a video. An MP4 with a subtitle
+track is written to STDOUT. Add --bake to burn the subtitles into the video
+stream instead (hardsubs).
 
-Usage: /entrypoint.sh <input> [--output <output>] [--bake] [--help]
-  <input>: Required. A media file that must exist.
-  --output, -o: Optional. When provided with a video, an MP4 will be created 
-                that has subtitles from the transcript.
-  --bake,   -b: Optional. Used with --output. When generating a video, rather 
-                than a separate subtitle track, the subtitles will be drawn 
-                over the video.
+Usage: /entrypoint.sh [--output] [--bake] [--help]
+  --output, -o: Trigger subtitle/video mode. Output MP4 is written to STDOUT.
+  --bake,   -b: Used with --output. Burns subtitles into the video stream.
   --help,   -h: Display this help message.
 ```
 
-The Docker image expects a folder called `/audio` to be mounted containing the media file to be transcribed.
+The Docker image reads from STDIN and writes to STDOUT, so no volume mount is required.
 
 ```
-docker run -v $PWD:/audio --rm -i gencore/whisperx-speech-to-text <my-video-file.mp4>
+# Transcribe
+docker run --rm -i gencore/whisperx-speech-to-text < my-video-file.mp4
+
+# Subtitles (soft track)
+docker run --rm -i gencore/whisperx-speech-to-text --output < my-video-file.mp4 > output.mp4
+
+# Subtitles (baked in)
+docker run --rm -i gencore/whisperx-speech-to-text --output --bake < my-video-file.mp4 > output.mp4
 ```
 
 ## STDOUT/STDERR

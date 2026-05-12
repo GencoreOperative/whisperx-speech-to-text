@@ -78,6 +78,5 @@ RUN echo "${MODEL_SIZE}" > /etc/model_size && \
 # Entrypoint for argument processing
 # ----------------------------------
 ADD entrypoint.sh /
-RUN mkdir /audio
-WORKDIR /audio
+WORKDIR /tmp
 ENTRYPOINT [ "/bin/bash", "/entrypoint.sh" ]

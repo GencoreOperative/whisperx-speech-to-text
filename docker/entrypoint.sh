@@ -2,53 +2,30 @@
 
 set -e
 
-# This script will process the input arguments for the user. 
-# See the help information for the arguents.
-
-# Help message
 HELP_MESSAGE="
-By default, the command will perform audio transcript of the provided media. 
-Media that is not in MP3 format will be converted first. The transcription 
-will be output to STDOUT.
+Media is read from STDIN. By default, the transcript is written to STDOUT.
 
-If the --output argument is provided, and the input is a video, then an MP4 
-video will be created that contains the transcription as a subtitle track. 
-Lastly, if the --bake option is included, then the subtitles will be drawn 
-on top of the video stream (hardsubs).
+If --output is provided, the input must be a video. An MP4 with a subtitle
+track is written to STDOUT. Add --bake to burn the subtitles into the video
+stream instead (hardsubs).
 
-Usage: $0 <input> [--output <output>] [--bake] [--help]
-  <input>: Required. A media file that must exist.
-  --output, -o: Optional. When provided with a video, an MP4 will be created 
-                that has subtitles from the transcript.
-  --bake,   -b: Optional. Used with --output. When generating a video, rather 
-                than a separate subtitle track, the subtitles will be drawn 
-                over the video.
+Usage: $0 [--output] [--bake] [--help]
+  --output, -o: Trigger subtitle/video mode. Output MP4 is written to STDOUT.
+  --bake,   -b: Used with --output. Burns subtitles into the video stream.
   --help,   -h: Display this help message."
 
-# Function to display usage information
 usage() {
-    echo "$HELP_MESSAGE"
+    echo "$HELP_MESSAGE" >&2
     exit 1
 }
 
-# Check if at least one argument (input file) is provided
-if [ $# -lt 1 ]; then
-    usage
-fi
-
-# Initialize variables
-SOURCE=""
-TARGET=""
-BAKE=false
 VIDEO=false
+BAKE=false
 
-# Parse arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --output|-o)
-            TARGET="$2"
             VIDEO=true
-            shift
             ;;
         --bake|-b)
             BAKE=true
@@ -57,77 +34,44 @@ while [[ "$#" -gt 0 ]]; do
             usage
             ;;
         *)
-            if [ -z "$SOURCE" ]; then
-                SOURCE="$1"
-            else
-                echo "Unknown parameter: $1"
-                usage
-            fi
+            echo "Unknown parameter: $1" >&2
+            usage
             ;;
     esac
     shift
 done
 
-# Check if the input file exists
-if [ ! -f "$SOURCE" ]; then
-    echo "Input file does not exist: $SOURCE"
+# -----------------------------------------------
+# Read STDIN into a temp file.
+# ffmpeg requires a seekable input for most formats.
+# -----------------------------------------------
+INPUT=/tmp/stdin_input
+cat - > "$INPUT"
+
+if [ ! -s "$INPUT" ]; then
+    echo "Error: No input received on STDIN." >&2
     usage
-fi
-
-SOURCE_EXTENSION=$(echo "$SOURCE" | rev | cut -d'.' -f1 | tr '[:upper:]' '[:lower:]' | rev)
-
-# If the user has specified an output file, then we need to ensure that the
-# input file is a video file.
-if [ "$VIDEO" == "true" ]; then
-    VIDEO_EXTENSIONS=("mp4" "avi" "mkv" "mov" "wmv" "flv" "webm" "m4v" "mpg" "mpeg" "3gp")
-    IS_VIDEO=false
-    for VIDEO_EXTENSION in "${VIDEO_EXTENSIONS[@]}"; do
-        if [ "$SOURCE_EXTENSION" == "$VIDEO_EXTENSION" ]; then
-            IS_VIDEO=true
-            break
-        fi
-    done
-
-    if [ "$IS_VIDEO" == "false" ]; then
-        echo "When using --output, the input file must be a video file. The following"
-        echo "extensions are supported: ${VIDEO_EXTENSIONS[@]}"
-        usage
-    fi
 fi
 
 # -----------------------------------------------
 # Audio Extraction
-# Convert the provided media into WAV format.
+# Convert the provided media to 16kHz mono WAV.
 # -----------------------------------------------
-# The generated audio must be in a fixed location for the next stage of processing.
-
 AUDIO=/tmp/audio.wav
-
-# Convert all input to 16kHz mono WAV (WhisperX's native format).
-# This also applies dynamic audio normalisation for consistent transcription quality,
-# and ensures WAV files with wrong sample rates or channel counts are fixed.
-ffmpeg -i "$SOURCE" \
+ffmpeg -i "$INPUT" \
 	-ar 16000 \
 	-ac 1 \
 	-filter:a dynaudnorm \
-	$AUDIO >&2
-
-# -----------------------------------------------
-# Whisper Transcription
-# -----------------------------------------------
-# This stage will now perform the transcription based on the mode defined by the
-# user. Depending on the mode flags will control which files we generate.
-# Note: https://github.com/openai/whisper/discussions/301 provided the tip on FP16 mode
+	"$AUDIO" >&2
 
 MODEL_SIZE=$(cat /etc/model_size)
 
 # -----------------------------------------------
-# Non-Video Mode
-# In this mode, the user only wants the transcipt outputted to STDOUT. We will 
-# generate the transcription, skipping the alignment stage.
+# Transcript Mode
+# Skip alignment; output plain text to STDOUT.
 # -----------------------------------------------
 if [ "$VIDEO" == "false" ]; then
-	cd /audio && whisperx \
+	whisperx \
 	  --threads $(nproc) \
 	  --model ${MODEL_SIZE} \
 	  --compute_type int8 \
@@ -136,52 +80,50 @@ if [ "$VIDEO" == "false" ]; then
 	  --language en \
 	  --no_align \
 	  --print_progress True \
-	  $AUDIO >&2
+	  "$AUDIO" >&2
 	cat /tmp/audio.txt
 	exit
 fi
 
 # -----------------------------------------------
-# Video Mode
-# In this mode, the user has provided an output file name that will be used to store
-# the video into. Alignment will be required for accurate generation of the subtitles.
+# Video/Subtitle Mode
+# Run alignment for accurate subtitle timing, then
+# mux with the original video and stream to STDOUT
+# as a fragmented MP4 (seekable output not required).
 # -----------------------------------------------
-
-cd /audio && whisperx \
+whisperx \
 	--model ${MODEL_SIZE} \
 	--compute_type int8 \
 	--output_format srt \
 	--output_dir /tmp \
 	--language en \
 	--print_progress True \
-	$AUDIO >&2
+	"$AUDIO" >&2
 
-# If the source was a Video file, convert into the target MP4 file 
-# with the subtitle track included. If the bake flag was set, then
-# instead, bake the subtitles into the video stream.
 if [ "$BAKE" == "true" ]; then
-	ffmpeg -i "$SOURCE" \
-		-y \
+	# Hard subtitles: burn text into the video stream
+	ffmpeg -i "$INPUT" \
 		-vf subtitles=/tmp/audio.srt \
 		-c:v libx264 \
 		-profile:v high \
 		-crf 22 \
-		-strict experimental \
 		-c:a aac \
 		-q:a 6 \
 		-filter:a dynaudnorm \
-		-c:s mov_text \
-		"$TARGET" >&2
+		-movflags frag_keyframe+empty_moov \
+		-f mp4 \
+		pipe:1
 else
+	# Soft subtitles: add as a separate subtitle track
 	# https://superuser.com/questions/700082/is-there-an-option-in-ffmpeg-to-specify-a-subtitle-track-that-should-be-shown-by
-	# Provided detail on the subtitle commands
-	ffmpeg -i "$SOURCE" \
-		-y \
+	ffmpeg -i "$INPUT" \
 		-i /tmp/audio.srt \
 		-c:v copy \
 		-c:a copy \
 		-c:s mov_text \
 		-metadata:s:s:0 language=eng \
 		-disposition:s:0 default \
-		"$TARGET" >&2
+		-movflags frag_keyframe+empty_moov \
+		-f mp4 \
+		pipe:1
 fi
