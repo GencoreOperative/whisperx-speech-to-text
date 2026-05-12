@@ -27,19 +27,18 @@ all_tags = $(foreach model,$(models),$(call tags_for_model,$(model)))
 # --- Targets ---
 all: build
 
-.PHONY: build clean publish
+.PHONY: build build-% clean publish
 
-build:
-	@echo "Building the WhisperX images"
-	$(foreach model,$(models), \
-		echo "Building WhisperX Model: $(model)"; \
-		DOCKER_BUILDKIT=1 docker build docker \
-			--build-arg MODEL_SIZE=$(model) \
-			--build-arg WHISPER_VERSION=$(whisper) \
-			$(foreach tag,$(call tags_for_model,$(model)),--tag $(tag)) ; \
-	)
+build: $(addprefix build-,$(models))
 	@echo "Tagging the '$(latest_model)' model as latest"
 	docker tag $(project):$(whisper)-$(latest_model) $(project):latest
+
+build-%:
+	@echo "Building WhisperX Model: $*"
+	DOCKER_BUILDKIT=1 docker build docker \
+		--build-arg MODEL_SIZE=$* \
+		--build-arg WHISPER_VERSION=$(whisper) \
+		$(foreach tag,$(call tags_for_model,$*),--tag $(tag))
 
 clean:
 	@echo "Cleaning up Docker images"
