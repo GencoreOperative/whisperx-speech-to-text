@@ -62,14 +62,57 @@ In addition, a `--bake` flag is included that will burn the subtitles into the v
 
 # Run - Quick
 
-The simplest way to run the project is to use the provided shell script `transcribex` which is included in this project.
+The simplest way to run the project is to use the provided shell scripts which are included in this project.
 
 ```
 curl -o transcribex https://raw.githubusercontent.com/GencoreOperative/whisperx-speech-to-text/main/transcribex
-bash transcribex <my-video-file.mp4>
+curl -o subtitlex   https://raw.githubusercontent.com/GencoreOperative/whisperx-speech-to-text/main/subtitlex
+```
+
+## transcribex
+
+Transcribes any audio or video file to STDOUT. Defaults to the `small` model.
+
+```
+# Transcribe with the default (small) model
+bash transcribex my-audio.mp3
+
+# Choose a model size
+bash transcribex --model small  my-audio.mp3
+bash transcribex --model medium my-audio.mp3
+bash transcribex --model large  my-audio.mp3
+
+# Save the transcript to a file
+bash transcribex --output transcript.txt my-audio.mp3
+
+# Suppress FFMPEG/WhisperX progress output
+bash transcribex --quiet my-audio.mp3
+```
+
+## subtitlex
+
+Adds subtitles to a video, writing the result to a new MP4. Defaults to the `small` model.
+
+```
+# Add a subtitle track with the default (small) model
+bash subtitlex my-video.mp4
+
+# Choose a model size
+bash subtitlex --model small  my-video.mp4
+bash subtitlex --model medium my-video.mp4
+bash subtitlex --model large  my-video.mp4
+
+# Specify the output file name (default: subtitle-<input>)
+bash subtitlex --output output.mp4 my-video.mp4
+
+# Burn subtitles into the video stream (hardsubs)
+bash subtitlex --bake --output output.mp4 my-video.mp4
 ```
 
 # Run - Advanced
+
+For direct Docker usage, the model size is selected by choosing the corresponding image tag.
+The available tags are `small`, `medium`, and `large-v3`. The `latest` tag maps to `small`.
 
 The Docker image supports the following command line arguments:
 ```
@@ -88,14 +131,16 @@ Usage: /entrypoint.sh [--output] [--bake] [--help]
 The Docker image reads from STDIN and writes to STDOUT, so no volume mount is required.
 
 ```
-# Transcribe
-docker run --rm -i gencore/whisperx-speech-to-text < my-video-file.mp4
+# Transcribe — using each model size
+docker run --rm -i gencore/whisperx-speech-to-text:small    < my-video-file.mp4
+docker run --rm -i gencore/whisperx-speech-to-text:medium   < my-video-file.mp4
+docker run --rm -i gencore/whisperx-speech-to-text:large-v3 < my-video-file.mp4
 
 # Subtitles (soft track)
-docker run --rm -i gencore/whisperx-speech-to-text --output < my-video-file.mp4 > output.mp4
+docker run --rm -i gencore/whisperx-speech-to-text:medium --output < my-video-file.mp4 > output.mp4
 
 # Subtitles (baked in)
-docker run --rm -i gencore/whisperx-speech-to-text --output --bake < my-video-file.mp4 > output.mp4
+docker run --rm -i gencore/whisperx-speech-to-text:medium --output --bake < my-video-file.mp4 > output.mp4
 ```
 
 ## STDOUT/STDERR
