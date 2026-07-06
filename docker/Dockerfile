@@ -37,9 +37,10 @@ RUN pip install --no-cache-dir \
     "onnxruntime>=1.19" \
     "pandas>=2.2.3" \
     "pyannote-audio>=3.3.2" \
-    "torchaudio>=2.3.1" \
-    "transformers>=4.48.0" \
-    torch==2.3.1+cpu -f https://download.pytorch.org/whl/cpu/torch_stable.html \
+    "transformers>=4.48.0,<5.0" \
+    torch==2.3.1+cpu \
+    torchaudio==2.3.1+cpu \
+    -f https://download.pytorch.org/whl/cpu/torch_stable.html \
     backports.tarfile \
     matplotlib
 
