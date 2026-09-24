@@ -12,12 +12,19 @@ usage() {
     echo "Options:"
     echo "  -o, --output <file>  Specify the output file name (default: STDOUT)"
     echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
+    echo "  -d, --diarize        Assign speaker labels ([SPEAKER_00]: ...) to the output"
+    echo "  -a, --aligned        With --diarize, run the alignment pass for word-level"
+    echo "                       speaker attribution (slower, finer-grained labels)"
+    echo "  --min-speakers <n>   With --diarize, lower bound for speaker count"
+    echo "  --max-speakers <n>   With --diarize, upper bound for speaker count"
     echo "  -q, --quiet          Suppress STDERR output from the docker image"
     echo "  -h, --help           Display this help message"
     echo ""
     echo "Example:"
     echo "  $0 --model medium my_audio.mp3"
     echo "  $0 -o transcript.txt my_video.mp4"
+    echo "  $0 --diarize my_interview.mp3"
+    echo "  $0 --diarize --min-speakers 2 --max-speakers 4 panel.mp3"
     exit 1
 }
 
@@ -25,6 +32,10 @@ INPUT=""
 OUTPUT=""
 SIZE=""
 QUIET=false
+DIARIZE=""
+ALIGNED=""
+MIN_SPEAKERS=""
+MAX_SPEAKERS=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -36,6 +47,24 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --model|-m)
             SIZE="$2"
+            shift
+            shift
+            ;;
+        --diarize|-d)
+            DIARIZE=1
+            shift
+            ;;
+        --aligned|-a)
+            ALIGNED=1
+            shift
+            ;;
+        --min-speakers)
+            MIN_SPEAKERS="$2"
+            shift
+            shift
+            ;;
+        --max-speakers)
+            MAX_SPEAKERS="$2"
             shift
             shift
             ;;
@@ -98,17 +127,27 @@ trap cleanup INT TERM
 
 DOCKER_RUN=(docker run --name "$CONTAINER_NAME" --rm -e PYTHONUNBUFFERED=1 -i "$MODEL_TAG")
 
+# Diarization flags — passed straight through to the container entrypoint.
+# The image has the diarization models baked in; no token or volume needed.
+CONTAINER_ARGS=()
+if [ -n "$DIARIZE" ]; then
+    CONTAINER_ARGS+=(-d)
+    [ -n "$ALIGNED" ] && CONTAINER_ARGS+=(-a)
+    [ -n "$MIN_SPEAKERS" ] && CONTAINER_ARGS+=(--min-speakers "$MIN_SPEAKERS")
+    [ -n "$MAX_SPEAKERS" ] && CONTAINER_ARGS+=(--max-speakers "$MAX_SPEAKERS")
+fi
+
 if [ "$QUIET" = "true" ]; then
     if [ -z "$OUTPUT" ]; then
-        cat "$INPUT" | "${DOCKER_RUN[@]}" 2>/dev/null &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" "${CONTAINER_ARGS[@]}" 2>/dev/null &
     else
-        cat "$INPUT" | "${DOCKER_RUN[@]}" > "$OUTPUT" 2>/dev/null &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" "${CONTAINER_ARGS[@]}" > "$OUTPUT" 2>/dev/null &
     fi
 else
     if [ -z "$OUTPUT" ]; then
-        cat "$INPUT" | "${DOCKER_RUN[@]}" &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" "${CONTAINER_ARGS[@]}" &
     else
-        cat "$INPUT" | "${DOCKER_RUN[@]}" > "$OUTPUT" &
+        cat "$INPUT" | "${DOCKER_RUN[@]}" "${CONTAINER_ARGS[@]}" > "$OUTPUT" &
     fi
 fi
 DOCKER_PID=$!

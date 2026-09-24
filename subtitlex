@@ -16,11 +16,15 @@ usage() {
     echo "  -o, --output <file>  Specify the output file name (default: subtitle-<input_video_file>)"
     echo "  -b, --bake           Bake subtitles directly into the video"
     echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
+    echo "  -d, --diarize        Prefix subtitles with speaker labels ([SPEAKER_00]: ...)"
+    echo "  --min-speakers <n>   With --diarize, lower bound for speaker count"
+    echo "  --max-speakers <n>   With --diarize, upper bound for speaker count"
     echo "  -h, --help           Display this help message"
     echo ""
     echo "Example:"
     echo "  $0 my_video.mp4"
     echo "  $0 -b -o output.mp4 input.mp4"
+    echo "  $0 --diarize my_interview.mp4"
     exit 1
 }
 
@@ -28,6 +32,9 @@ INPUT=""
 TARGET=""
 BAKE=""
 SIZE=""
+DIARIZE=""
+MIN_SPEAKERS=""
+MAX_SPEAKERS=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -43,6 +50,20 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --model|-m)
             SIZE="$2"
+            shift
+            shift
+            ;;
+        --diarize|-d)
+            DIARIZE=1
+            shift
+            ;;
+        --min-speakers)
+            MIN_SPEAKERS="$2"
+            shift
+            shift
+            ;;
+        --max-speakers)
+            MAX_SPEAKERS="$2"
             shift
             shift
             ;;
@@ -91,5 +112,14 @@ case $SIZE in
         ;;
 esac
 
+# Diarization flags — passed straight through to the container entrypoint.
+# The image has the diarization models baked in; no token or volume needed.
+CONTAINER_ARGS=(--output $BAKE)
+if [ -n "$DIARIZE" ]; then
+    CONTAINER_ARGS+=(-d)
+    [ -n "$MIN_SPEAKERS" ] && CONTAINER_ARGS+=(--min-speakers "$MIN_SPEAKERS")
+    [ -n "$MAX_SPEAKERS" ] && CONTAINER_ARGS+=(--max-speakers "$MAX_SPEAKERS")
+fi
+
 mkdir -p "$(dirname "$TARGET")"
-cat "$INPUT" | docker run --rm -i "$MODEL_TAG" --output $BAKE > "$TARGET"
+cat "$INPUT" | docker run --rm -i "$MODEL_TAG" "${CONTAINER_ARGS[@]}" > "$TARGET"

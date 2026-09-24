@@ -1,5 +1,13 @@
 # Diarization Implementation Plan
 
+> **STATUS: IMPLEMENTED AND VERIFIED (2026-09-24).** All steps complete. The bake step is
+> proven with a real token-authenticated build (`make build-small`), diarization works
+> fully offline (`--network none`), and both wrapper scripts pass the new flags through.
+> The `--aligned` mode evolved during implementation: it emits JSON and regroups word-level
+> speaker labels into speaker-turn lines (the TXT writer discards word labels — see
+> Step 4). Test article: `gencore/whisperx-speech-to-text:small-diarize-proto` (prototype,
+> COPY-based) and `:small` (production, secret-baked).
+
 **Diagrams** (Mermaid source + rendered PNG in `diagrams/`):
 - [Current architecture](diagrams/current-architecture.png) — the solution as committed today
   ([source](diagrams/current-architecture.mmd)).
@@ -16,8 +24,8 @@ pyannote's terms of use and supply a personal access token before they can be do
 
 The `--diarize` flag passed to `whisperx` triggers diarization. In whisperx 3.3.2,
 diarization runs regardless of `--no_align` and assigns speaker labels via time overlap —
-so unaligned segments still carry speaker labels (verified in source). Whether transcript
-mode can keep `--no_align` is settled by the Step 1 smoke test.
+so unaligned segments still carry speaker labels (verified in source **and confirmed
+empirically** — see "Smoke test result" under Decisions).
 
 Also verified against whisperx 3.3.2 source: the CLI flags `--diarize`, `--min_speakers`,
 `--max_speakers`, and `--hf_token` all exist. The TXT writer prefixes lines with
@@ -66,10 +74,31 @@ Accepting terms on only the diarization page produces a confusing failure at bui
 
 ### Known trade-offs (documented in README, not fixed)
 
-- **CPU speed:** the image is CPU-only (torch 2.3.1+cpu, int8); pyannote's
-  speaker-embedding stage runs at roughly real-time or slower on CPU.
-- **torch pin:** the Dockerfile pins torch 2.3.1+cpu while pyannote 3.3.2's lockfile lists
-  torch 2.7.0. Untested together — budget one debugging session on first real `--diarize` run.
+- **CPU speed:** the image is CPU-only (torch 2.3.1+cpu, int8). Measured in the smoke test
+  (below): a 36 s clip transcribed *and* diarized in ~25 s wall time on the small model —
+  much better than the "real-time or worse" worst case; the README can describe
+  diarization as adding roughly half the transcription time rather than warning of
+  real-time-or-worse.
+- **torch pin:** **resolved by the smoke test** — the diarization pipeline ran cleanly on
+  torch 2.3.1+cpu. The only warning seen is the pre-existing VAD-model version notice.
+
+### Smoke test result (Step 1 — executed 2026-09-24)
+
+Ran the existing `:small` image with a manual `whisperx --no_align --diarize --hf_token ""`
+invocation on `test/we-choose-to-go-to-the-moon.mp4`, `HF_HUB_OFFLINE=1`, pyannote models
+supplied via a mounted cache. **Outcome: transcript mode KEEPS `--no_align`.**
+
+- `[SPEAKER_00]:`-prefixed lines appear on STDOUT without the alignment pass — the
+  entrypoint change is purely appending `DIA_ARGS`.
+- Offline, token-free operation confirmed end-to-end (the plan's no-token-check design).
+- **Cache-dir discovery:** pyannote's `Pipeline.from_pretrained` does **not** use the HF
+  hub cache — it uses `~/.cache/torch/pyannote`, overridable via `$PYANNOTE_CACHE`. For
+  the Dockerfile bake step this is self-consistent (bake and runtime share the in-image
+  default), but any manual cache seeding must target `PYANNOTE_CACHE` or the default
+  torch path, not `~/.cache/huggingface/hub` alone.
+- Diarization-3.1 actually comprises **three** pieces: pipeline `config.yaml` (469 B),
+  `pyannote/segmentation-3.0` weights (~5.9 MB), and `pyannote/wespeaker-voxceleb-resnet34-LM`
+  embedding weights (~26.6 MB, **not gated**). Total ~33 MB.
 
 ---
 
@@ -116,6 +145,19 @@ What they see, in order:
 bash transcribex --diarize --min-speakers 2 --max-speakers 4 meeting.mp3
 ```
 
+**Word-aligned variant** — if speaker attribution looks off (see "Attribution accuracy"
+below), opt into the alignment pass for word-level speaker annotation:
+```bash
+bash transcribex --diarize --aligned meeting.mp3
+```
+Default transcript mode skips alignment (cheap, segment-level labels — a segment bridging
+two speakers takes the dominant voice's label). `--aligned` runs the alignment pass too:
+whisperx then stamps a speaker onto every **word** (confirmed in the second smoke test),
+and the entrypoint regroups the text into speaker-turn lines — so a bridged segment is
+**split** at the speaker boundary instead of mislabelled wholesale. Slower (alignment +
+diarization, measured ~35 s vs ~25 s on the 36 s test clip, small model), but attributions
+follow the words. Subtitle mode always aligns (SRT timing requires it) and ignores the flag.
+
 **Subtitled video**:
 ```bash
 bash subtitlex --diarize interview.mp4          # soft subs, default output name
@@ -132,6 +174,7 @@ Runs are fully offline and repeatable — nothing is downloaded on any run.
 |-----------|-------------------|
 | `--diarize` on any image | Works immediately; fully offline |
 | `--min-speakers`/`--max-speakers` without `--diarize` | Flag accepted, passed through to whisperx, no effect (whisperx ignores them without `--diarize`) |
+| `--aligned` without `--diarize` | No-op for transcript mode (no diarization → no word labels to align); subtitle mode already aligns |
 | No `--diarize` at all | Existing behaviour, unchanged |
 | Very long audio on CPU | Works, but slow — README sets the expectation; no artificial limit |
 | Build without `HF_TOKEN` | Build fails at the bake step; export the token and rerun |
@@ -153,12 +196,9 @@ HuggingFace token (`hf_...`) is separate.
 
 ### Step 1: Smoke test — settle the `--no_align` question first
 
-Before any code changes, run the existing image with a manual `whisperx --diarize`
-invocation on `test/jfk.wav` (or `bain23.pdf`'s companion audio) with `--no_align` and
-inspect the output. If `[SPEAKER_XX]:` prefixes appear, transcript mode keeps `--no_align`
-and the entire entrypoint change reduces to appending pre-built diarization args; if not,
-transcript mode drops `--no_align` when diarizing. This also gives an early answer to the
-torch-pin caveat above.
+**DONE (2026-09-24) — see "Smoke test result" under Decisions. Transcript mode keeps
+`--no_align`; the entrypoint change is purely appending `DIA_ARGS`. The torch pin is also
+cleared.**
 
 ### Step 2: `docker/Dockerfile` — mandatory bake
 
@@ -177,6 +217,14 @@ COPY PYANNOTE-NOTICE /etc/PYANNOTE-NOTICE
   error. That is the intended behaviour — export the token and rerun. No marker file, no
   fallback flavour, no empty-secret short-circuit to reason about.
 - The token never enters image layers, build cache, or `docker history`.
+- The download lands in pyannote's native cache path (`~/.cache/torch/pyannote`), not the
+  HF hub cache — the smoke-test discovery. No `PYANNOTE_CACHE` configuration needed: the
+  runtime reads the same default.
+- `PYANNOTE-NOTICE` lives in `docker/` (the build context), not the repo root — the
+  `COPY PYANNOTE-NOTICE` path is relative to the context, so a root-level copy fails the
+  build with `"/PYANNOTE-NOTICE": not found`. Discovered when the notice was briefly
+  moved to the root; a cached rebuild masked the failure once before a no-cache build
+  exposed it.
 
 ### Step 3: `Makefile` — one line
 
@@ -187,7 +235,8 @@ needs `HF_TOKEN` set at build time; document in the README.
 
 ### Step 4: `docker/entrypoint.sh` — single source of truth for diarization logic
 
-**New flags:** `--diarize` / `-d`, `--min-speakers <n>`, `--max-speakers <n>`.
+**New flags:** `--diarize` / `-d`, `--aligned` / `-a`, `--min-speakers <n>`,
+`--max-speakers <n>`.
 
 **Build the whisperx flags once, use twice:**
 ```bash
@@ -204,15 +253,25 @@ duplication of the flag list.
 **No token logic at all:** every image has the models baked in, so when `--diarize` is set
 the entrypoint sets `HF_HUB_OFFLINE=1` — huggingface_hub never contacts the Hub, and the
 empty `--hf_token ""` is passed harmlessly to satisfy whisperx's argument check. There is
-**no** token check anywhere in the codebase.
+**no** token check anywhere in the codebase. Without this flag, a diarized run wastes
+~40 seconds on HEAD-request retries against huggingface.co (5 retries per model file,
+3 model repos) before falling back to the local cache — discovered in the first
+entrypoint test, which ran without the env var and worked but stalled.
 
-**Transcript mode:** per the Step 1 smoke test — either keep `--no_align` (change is purely
-appending `"$DIA_ARGS"`) or drop it when `DIARIZE` is set.
+**Transcript mode:** keeps `--no_align` by default (settled by the Step 1 smoke test) —
+the change is purely appending `"$DIA_ARGS"`. When `--aligned` is also set: **omit**
+`--no_align` and run with `--output_format json` instead of `txt`, because the TXT writer
+prints only segment labels — word-level speaker labels (which exist only when alignment
+ran) would be discarded. The entrypoint then regroups the JSON words into speaker-turn
+lines (splitting bridged segments at speaker boundaries) and prints them to STDOUT as
+`[SPEAKER_XX]: text` lines, same shape as the default output.
 
 ### Step 5: `transcribex` and `subtitlex` — flag passthrough only
 
 Identical changes to both, and nothing else:
-- **New flags:** `--diarize` / `-d`, `--min-speakers`, `--max-speakers`.
+- **New flags:** `--diarize` / `-d`, `--aligned` / `-a`, `--min-speakers`, `--max-speakers`.
+  (`--aligned` is accepted by both for a uniform CLI; the entrypoint decides its effect —
+  meaningful only in transcript mode.)
 - No env forwarding, no volume mounts, no host-side conditionals — images are
   self-contained.
 
@@ -222,10 +281,21 @@ HF model pages whose terms the builder accepted.
 
 ### Step 7: `README.md` — Diarization section
 - What diarization does and when to use it.
+- The two transcript modes: default (segment-level labels, cheap) and `--aligned`
+  (word-level labels; bridged segments split at speaker boundaries) — with guidance that
+  `SPEAKER_XX` means "dominant voice in this segment", and `--aligned` is the tool to
+  reach for when attribution looks off.
+- **Attribution accuracy:** speaker labels are assigned per segment by time overlap; a
+  segment that bridges two speakers takes the label of the dominant voice, so the first
+  words after a speaker hand-off can carry the previous speaker's label. Crosstalk and
+  backchannel ("mm-hm") may be absorbed into the dominant speaker. Passing
+  `--min-speakers`/`--max-speakers` when the count is known prevents the clusterer from
+  merging similar voices.
 - Building: requires `HF_TOKEN` and terms accepted on **both** gated model pages; the
   resulting image (local or pulled from Docker Hub) is fully offline for diarization.
 - Usage examples.
-- The CPU performance expectation.
+- The CPU performance expectation (measured: diarization adds roughly half the
+  transcription time on the small model).
 
 ---
 
@@ -256,9 +326,9 @@ unavailable in some build environment.
 |------|-------------|
 | `docker/Dockerfile` | ~8 lines |
 | `Makefile` | ~1 line |
-| `docker/entrypoint.sh` | ~15 lines |
-| `transcribex` | ~12 lines |
-| `subtitlex` | ~12 lines |
+| `docker/entrypoint.sh` | ~30 lines (includes JSON→speaker-turn regrouping for `--aligned`) |
+| `transcribex` | ~16 lines |
+| `subtitlex` | ~16 lines |
 | `PYANNOTE-NOTICE` | ~10 lines |
 | `README.md` | ~40 lines |
 | `.gitignore` | 1 line |
@@ -278,6 +348,9 @@ bash transcribex --diarize meeting.mp3
 
 # Transcribe with known speaker count
 bash transcribex --diarize --min-speakers 2 --max-speakers 4 meeting.mp3
+
+# Word-level aligned speaker annotation (slower; use if attribution looks off)
+bash transcribex --diarize --aligned meeting.mp3
 
 # Add diarized subtitles to a video
 bash subtitlex --diarize --model medium interview.mp4

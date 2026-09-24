@@ -107,7 +107,62 @@ bash subtitlex --output output.mp4 my-video.mp4
 
 # Burn subtitles into the video stream (hardsubs)
 bash subtitlex --bake --output output.mp4 my-video.mp4
+
+# Prefix subtitles with speaker labels
+bash subtitlex --diarize my-interview.mp4
 ```
+
+# Diarization
+
+Diarization adds **speaker identification** to the output: each transcript line (or subtitle)
+is prefixed with the speaker who said it, e.g. `[SPEAKER_00]:`. The labels are arbitrary
+identities assigned by clustering voice characteristics — the tool does not know real names,
+only which stretches of audio sound like the same person. Speaker count can be guided with
+`--min-speakers` / `--max-speakers` when it is known, which improves accuracy.
+
+The diarization models are baked into the Docker image at build time. **No HuggingFace
+token, network access, or configuration is needed at run time** — the image works fully
+offline.
+
+## Transcription with speaker labels
+
+```
+# Transcribe with speaker labels (segment-level attribution, fastest)
+bash transcribex --diarize my-interview.mp3
+
+# Guide the speaker count when it is known
+bash transcribex --diarize --min-speakers 2 --max-speakers 4 panel.mp3
+
+# Word-level attribution (slower): runs the alignment pass and splits transcript
+# lines at speaker hand-offs — use this if attribution looks off in default mode
+bash transcribex --diarize --aligned my-interview.mp3
+```
+
+Default transcript mode labels each segment with its dominant voice, so the first words
+after a speaker hand-off can carry the previous speaker's label; `--aligned` resolves this
+by attributing per word. Subtitle mode always uses precise timing, so `--diarize` is the
+only flag needed there.
+
+## Performance
+
+Diarization runs on CPU. Expect it to add roughly half of the transcription time
+(measured: a 36-second clip took ~25 s with diarization vs ~10 s without, small model);
+`--aligned` adds the alignment pass on top (~35 s for the same clip). Longer recordings
+scale accordingly.
+
+## Building the image
+
+The build downloads the pyannote models (~33 MB) via a BuildKit secret mount, so the token
+never enters the image or its history. One-time setup:
+
+1. Create a HuggingFace read token at `https://hf.co/settings/tokens`
+2. Accept the user conditions on **both** gated model pages:
+   - `https://hf.co/pyannote/speaker-diarization-3.1`
+   - `https://hf.co/pyannote/segmentation-3.0`
+3. `export HF_TOKEN=hf_...` before `make build`
+
+A build without `HF_TOKEN` fails at the model-bake step by design. The licence notice for
+the baked model weights is included in the image at `/etc/PYANNOTE-NOTICE`.
 
 # Run - Advanced
 
@@ -122,9 +177,18 @@ If --output is provided, the input must be a video. An MP4 with a subtitle
 track is written to STDOUT. Add --bake to burn the subtitles into the video
 stream instead (hardsubs).
 
-Usage: /entrypoint.sh [--output] [--bake] [--help]
+Speaker diarization labels each transcript line with the speaker who said it
+(e.g. [SPEAKER_00]:). The diarization models are baked into this image; no
+token or network access is needed.
+
+Usage: /entrypoint.sh [--output] [--bake] [--diarize] [--aligned] [--help]
   --output, -o: Trigger subtitle/video mode. Output MP4 is written to STDOUT.
   --bake,   -b: Used with --output. Burns subtitles into the video stream.
+  --diarize, -d: Assign speaker labels ([SPEAKER_00]: ...) to the output.
+  --aligned, -a: With --diarize in transcript mode, run the alignment pass for
+                 word-level speaker attribution (slower, finer-grained labels).
+  --min-speakers N: With --diarize, lower bound for speaker count.
+  --max-speakers N: With --diarize, upper bound for speaker count.
   --help,   -h: Display this help message.
 ```
 
@@ -136,11 +200,17 @@ docker run --rm -i gencore/whisperx-speech-to-text:small    < my-video-file.mp4
 docker run --rm -i gencore/whisperx-speech-to-text:medium   < my-video-file.mp4
 docker run --rm -i gencore/whisperx-speech-to-text:large-v3 < my-video-file.mp4
 
+# Transcribe with speaker labels
+docker run --rm -i gencore/whisperx-speech-to-text:small -d < my-interview.mp3
+
 # Subtitles (soft track)
 docker run --rm -i gencore/whisperx-speech-to-text:medium --output < my-video-file.mp4 > output.mp4
 
 # Subtitles (baked in)
 docker run --rm -i gencore/whisperx-speech-to-text:medium --output --bake < my-video-file.mp4 > output.mp4
+
+# Subtitles with speaker labels
+docker run --rm -i gencore/whisperx-speech-to-text:medium --output -d < my-interview.mp4 > output.mp4
 ```
 
 ## STDOUT/STDERR

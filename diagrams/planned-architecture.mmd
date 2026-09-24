@@ -60,7 +60,8 @@ flowchart TB
             stdin_read["read STDIN into /tmp/stdin_input"]
             ffmpeg1["ffmpeg: 16 kHz mono WAV + dynaudnorm"]
             mode{"--output flag?"}
-            tx_whisper["TRANSCRIPT MODE: whisperx<br/>--output_format txt --language en<br/>--compute_type int8<br/>+ DIA_ARGS when --diarize<br/>(--no_align kept or dropped<br/>pending jfk.wav smoke test)"]:::changed
+            tx_whisper["TRANSCRIPT MODE (default): whisperx<br/>--output_format txt --language en<br/>--compute_type int8 --no_align<br/>+ DIA_ARGS when --diarize<br/>(segment-level speaker labels)"]:::changed
+            tx_aligned["TRANSCRIPT --aligned: whisperx<br/>--output_format json (alignment on)<br/>+ DIA_ARGS when --diarize<br/>→ regroup words into speaker turns<br/>(bridged segments split at boundaries)"]:::changed
             sub_whisper["VIDEO MODE: whisperx with alignment pass<br/>--output_format srt --language en<br/>+ DIA_ARGS when --diarize"]:::changed
             ffmpeg2["ffmpeg: mux SRT as mov_text track,<br/>or --bake: burn subtitles into video<br/>(speaker labels in SRT text)"]:::changed
             txout["[SPEAKER_00]: prefixed .txt<br/>on STDOUT"]
@@ -82,6 +83,8 @@ flowchart TB
     pipe -->|"STDIN"| stdin_read
     stdin_read --> ffmpeg1 --> mode
     mode -->|"no"| tx_whisper
+    mode -.->|"no + --aligned"| tx_aligned
+    tx_aligned --> txout
     mode -->|"yes"| sub_whisper --> ffmpeg2
     tx_whisper --> txout --> stdout
     ffmpeg2 --> stdout

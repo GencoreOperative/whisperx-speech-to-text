@@ -36,6 +36,7 @@ build: $(addprefix build-,$(models))
 build-%:
 	@echo "Building WhisperX Model: $*"
 	DOCKER_BUILDKIT=1 docker build docker \
+		--secret id=hf_token,env=HF_TOKEN \
 		--build-arg MODEL_SIZE=$* \
 		--build-arg WHISPER_VERSION=$(whisper) \
 		$(foreach tag,$(call tags_for_model,$*),--tag $(tag))

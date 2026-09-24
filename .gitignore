@@ -1,0 +1,13 @@
+# Secrets — never commit
+.token
+.hf-token
+
+# Pre-downloaded pyannote model caches (recreated from HuggingFace; too big for git)
+pyannote/
+docker/pyannote-cache/
+
+# Test output artifacts
+subtitle-*.mp4
+
+# Build logs
+build-log.txt

@@ -76,6 +76,27 @@ RUN echo "${MODEL_SIZE}" > /etc/model_size && \
     jfk.wav
 
 # ----------------------------------
+# Bake in the pyannote diarization models
+# ----------------------------------
+# Downloads the gated pyannote pipeline at build time into the image, so the
+# finished image is fully offline for diarization (DIARIZE-PLAN.md Step 2).
+# Requires HF_TOKEN in the builder's environment, with terms accepted on BOTH
+# gated model pages:
+#   https://hf.co/pyannote/speaker-diarization-3.1
+#   https://hf.co/pyannote/segmentation-3.0
+# The token is supplied via a BuildKit secret mount: it exists only in
+# /run/secrets during this step and never enters image layers, build cache,
+# or docker history. A build without HF_TOKEN fails here by design.
+# The models land in pyannote's native cache (PYANNOTE_CACHE default),
+# which the entrypoint consumes offline via HF_HUB_OFFLINE=1.
+RUN --mount=type=secret,id=hf_token \
+    python -c "from pyannote.audio import Pipeline; \
+    Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', \
+    use_auth_token=open('/run/secrets/hf_token').read().strip())"
+
+COPY PYANNOTE-NOTICE /etc/PYANNOTE-NOTICE
+
+# ----------------------------------
 # Entrypoint for argument processing
 # ----------------------------------
 ADD entrypoint.sh /
