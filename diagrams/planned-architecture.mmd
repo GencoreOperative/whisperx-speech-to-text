@@ -1,0 +1,94 @@
+---
+config:
+  theme: neutral
+  flowchart:
+    nodeSpacing: 50
+    rankSpacing: 60
+---
+flowchart TB
+    classDef new fill:#d5f5d5,stroke:#2e8b2e,stroke-width:2px
+    classDef changed fill:#fdf3d0,stroke:#b8860b,stroke-width:2px
+    classDef unchanged fill:#ffffff,stroke:#888888,stroke-width:1px
+
+    %% ============ LEGEND ============
+    subgraph LEGEND[" "]
+        direction LR
+        legnew["NEW element<br/>(added by this plan)"]:::new
+        legnew ~~~ legchg
+        legchg["CHANGED element<br/>(modified by this plan)"]:::changed
+        legchg ~~~ legunc
+        legunc["UNCHANGED<br/>(untouched by this plan)"]:::unchanged
+    end
+
+    %% ============ HOST ============
+    subgraph HOST["Host machine"]
+        direction TB
+        user(["User"])
+        media[/"input media file<br/>(audio or video)"/]
+        hftoken["HF_TOKEN env var<br/>(HuggingFace access token;<br/>terms accepted on BOTH gated<br/>model pages)"]:::new
+
+        subgraph WRAPPERS["Wrapper scripts (one docker run each)"]
+            direction LR
+            subgraph TX["transcribex"]
+                tx1["args: -o --output, -m --model,<br/>-q --quiet,<br/>-d --diarize,<br/>--min-speakers / --max-speakers<br/>tag: :small / :medium / :large-v3"]:::changed
+            end
+            subgraph SX["subtitlex"]
+                sx1["args: -o --output, -b --bake,<br/>-m --model,<br/>-d --diarize,<br/>--min-speakers / --max-speakers<br/>tag: :small / :medium / :large-v3"]:::changed
+            end
+        end
+
+        pipe[["cat FILE | docker run --rm -i :tag<br/>(flag passthrough only —<br/>no env, no volumes)"]]:::changed
+    end
+
+    %% ============ BUILD TIME ============
+    subgraph BUILD["docker build time (make build / make publish)"]
+        direction TB
+        secret["BuildKit secret mount:<br/>--secret id=hf_token,env=HF_TOKEN<br/>(never in layers, cache or docker history)"]:::new
+        gated["both models gated —<br/>terms accepted on each page:<br/>pyannote/speaker-diarization-3.1<br/>pyannote/segmentation-3.0"]:::new
+        bake["bake step: pyannote models downloaded into<br/>/root/.cache/huggingface inside image<br/>(unconditional: no HF_TOKEN = build fails)"]:::new
+        notice["PYANNOTE-NOTICE:<br/>MIT licence text + attribution<br/>(makes baked weights redistributable)"]:::new
+        deps["python:3.11-slim, ffmpeg,<br/>torch 2.3.1+cpu,<br/>whisperx (--no-deps),<br/>pyannote-audio (now actually used!)"]:::changed
+        precache["pre-cached Whisper +<br/>alignment models (jfk.wav step)"]
+        modelsize["/etc/model_size"]
+    end
+
+    %% ============ CONTAINER ============
+    subgraph IMAGE["Docker container: gencore/whisperx-speech-to-text :tag<br/>models baked in — fully offline, no token check anywhere"]
+        direction TB
+        subgraph EP["entrypoint.sh"]
+            direction TB
+            stdin_read["read STDIN into /tmp/stdin_input"]
+            ffmpeg1["ffmpeg: 16 kHz mono WAV + dynaudnorm"]
+            mode{"--output flag?"}
+            tx_whisper["TRANSCRIPT MODE: whisperx<br/>--output_format txt --language en<br/>--compute_type int8<br/>+ DIA_ARGS when --diarize<br/>(--no_align kept or dropped<br/>pending jfk.wav smoke test)"]:::changed
+            sub_whisper["VIDEO MODE: whisperx with alignment pass<br/>--output_format srt --language en<br/>+ DIA_ARGS when --diarize"]:::changed
+            ffmpeg2["ffmpeg: mux SRT as mov_text track,<br/>or --bake: burn subtitles into video<br/>(speaker labels in SRT text)"]:::changed
+            txout["[SPEAKER_00]: prefixed .txt<br/>on STDOUT"]
+        end
+    end
+
+    %% ============ OUTPUT ============
+    stdout[["STDOUT: transcript (.txt) with speaker labels,<br/>or MP4 with speaker-labelled subtitles"]]
+
+    %% ============ FLOWS ============
+    user --> tx1
+    user --> sx1
+    user --> media
+    user --> hftoken
+    media --> pipe
+    tx1 --> pipe
+    sx1 --> pipe
+    hftoken -->|"consumed at build time"| secret
+    pipe -->|"STDIN"| stdin_read
+    stdin_read --> ffmpeg1 --> mode
+    mode -->|"no"| tx_whisper
+    mode -->|"yes"| sub_whisper --> ffmpeg2
+    tx_whisper --> txout --> stdout
+    ffmpeg2 --> stdout
+    tx_whisper -.->|"uses"| precache
+    tx_whisper -.->|"reads"| modelsize
+    secret --> bake
+    gated --> bake
+    deps --> precache
+    deps --> modelsize
+    notice -.->|"ships in image"| bake

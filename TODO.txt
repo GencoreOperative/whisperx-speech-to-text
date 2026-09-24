@@ -1,0 +1,76 @@
+Bug: Present a WAV with uppercase filename
+Appears to fail, unclear why
+
+---
+
+There will be two modes of operation:
+
+Default Mode:
+The transcription will be output to STDOUT
+If the input is MP3 already, no FFMPEG conversion is required.
+If the input is not MP3, convert to MP3 first
+Output will only be set to txt.
+Use a /tmp/ location for the txt file.
+Transcription should skip alignment (--no_align)
+
+Video only mode:
+The second will be to output the video with subtitles
+Either subtitles will be in a separate stream or they will be baked in.
+
+---
+
+By default, the command will perform audio transcript of the provided media. Media that
+is not in MP3 format will be converted first. The transcription will be output to STDOUT.
+
+If the --output argument is provided, and the input is a video, then an MP4 video will be
+created that contains the transcription as a subtitle track. Lastly, if the --bake option 
+is included, then the subtitles will be drawn on top of the video stream (hardsubs)
+
+Usage: $0 <input> [--output <output>] [--bake] [--help]
+  <input>: Required. A media file that must exist.
+  --output, -o: Optional output file to store the output video. If no file name is provided, then one will be generated.
+  --bake, -b: Optional. Bake-in selector flag that will cause the subtitles to be baked into the video.
+  --help, -h: Display this help message."
+
+
+---
+
+If the first minute of the video does not contain spoken audio, then the language detection will kick in and get confused.
+We should look to pre-set the language to english until we are ready to create a multi-linqual version of the tool.
+
+Dependencies are a pain to install. There are many, and they are often large. We should focus on pre-installing the big ones using --no-deps and then cover the rest afterwards.
+
+These are the biggest:
+torch-2.5.0-cp39-cp39-manylinux1_x86_64.whl (906.5 MB)
+nvidia_cudnn_cu12-9.1.0.70-py3-none-manylinux2014_x86_64.whl (664.8 MB)
+nvidia_cublas_cu12-12.4.5.8-py3-none-manylinux2014_x86_64.whl (363.4 MB)
+triton-3.1.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (209.5 MB)
+nvidia_cusparse_cu12-12.3.1.170-py3-none-manylinux2014_x86_64.whl (207.5 MB)
+nvidia_nccl_cu12-2.21.5-py3-none-manylinux2014_x86_64.whl (188.7 MB)
+nvidia_cusolver_cu12-11.6.1.9-py3-none-manylinux2014_x86_64.whl (127.9 MB)
+nvidia_cufft_cu12-11.2.1.3-py3-none-manylinux2014_x86_64.whl (211.5 MB)
+
+---
+
+Using pip-tools, we have compiled a requirements.txt file:
+
+pip install pip-tools
+echo "whisperx==3.3.2" > requirements.in
+pip-compile -v requirements.in
+
+This gives us what I believe to be the minimum dependences needed for whisperx.
+We could:
+- Loop of these installing them as layers in Docker
+- Loop over a sub-set to install, and then cover the rest in a batch command.
+
+We could also, experimentally, try not installing each one at a time and see whether the Docker image fails to function. This would identify the ones that are not ACTUALLY needed in the project.
+
+
+---
+
+WhisperC
+A C version of the runtime needed to run Whisper.
+At 667MB for the base.en model, this Docker image is TINY by comparrison to the 18GB Python based one.
+With the small.en model loaded, this takes us up to 1GB. Still minisule by comparrison.
+
+This version is likely to not be as quick as WhisperX. But this size reduction in the image that people have to download just to use Whisper - this is hard to ignore.
