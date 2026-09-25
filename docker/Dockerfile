@@ -59,21 +59,19 @@ RUN python -m pytorch_lightning.utilities.upgrade_checkpoint \
     && echo "Checkpoint upgraded to Lightning v2.5.5 (CPU-safe)"
 
 # -------------------
-# Pre-cache the model
+# Pre-cache the models
 # -------------------
-# By running whisperx with the desired model size, we will pre-cache the model size inside
-# the docker image. This means the user will have everything they need to use this image
-# offline.
-# Also - be sure to no include the --no-align flag, so that the correspodning alignment model
-# is also downloaded.
-WORKDIR /tmp
-COPY jfk.wav /tmp/
+# Rather than running whisperx end-to-end on a sample file, we trigger the
+# downloads directly (same pattern as the pyannote step below). The entrypoint
+# pins --language en, so only the English alignment model is needed.
+# The models land in the standard caches (/root/.cache/huggingface/hub and
+# /root/.cache/torch/hub/checkpoints), which the entrypoint consumes offline.
 ARG MODEL_SIZE
 RUN echo "${MODEL_SIZE}" > /etc/model_size && \
-    whisperx \
-    --model ${MODEL_SIZE} \
-    --compute_type int8 \
-    jfk.wav
+    python -c "from faster_whisper import WhisperModel; \
+    WhisperModel('${MODEL_SIZE}', device='cpu', compute_type='int8')" && \
+    python -c "import whisperx; \
+    whisperx.load_align_model('en', 'cpu')"
 
 # ----------------------------------
 # Bake in the pyannote diarization models
@@ -89,10 +87,17 @@ RUN echo "${MODEL_SIZE}" > /etc/model_size && \
 # or docker history. A build without HF_TOKEN fails here by design.
 # The models land in pyannote's native cache (PYANNOTE_CACHE default),
 # which the entrypoint consumes offline via HF_HUB_OFFLINE=1.
+# NB: pyannote's from_pretrained catches the download failure and only prints
+# a warning (exit code 0), so a missing or invalid token would otherwise slip
+# through silently. The find below asserts the models actually landed.
+# Since pyannote 3.4.0 the models go to /root/.cache/torch/pyannote (the
+# huggingface/hub location was used by pyannote <= 3.3.x); accept either.
 RUN --mount=type=secret,id=hf_token \
     python -c "from pyannote.audio import Pipeline; \
     Pipeline.from_pretrained('pyannote/speaker-diarization-3.1', \
-    use_auth_token=open('/run/secrets/hf_token').read().strip())"
+    use_auth_token=open('/run/secrets/hf_token').read().strip())" && \
+    test -n "$(find /root/.cache/torch/pyannote /root/.cache/huggingface/hub \
+        -maxdepth 1 -type d -name 'models--pyannote--*' 2>/dev/null)"
 
 COPY PYANNOTE-NOTICE /etc/PYANNOTE-NOTICE
 
