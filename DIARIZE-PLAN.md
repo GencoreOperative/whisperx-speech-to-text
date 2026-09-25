@@ -7,6 +7,134 @@
 > speaker labels into speaker-turn lines (the TXT writer discards word labels — see
 > Step 4). Test article: `gencore/whisperx-speech-to-text:small-diarize-proto` (prototype,
 > COPY-based) and `:small` (production, secret-baked).
+>
+> **POST-IMPLEMENTATION ITERATION (2026-09-25): progress reporting, performance and
+> cancellation.** Diarization was the only silent phase of a run — and the slowest on
+> CPU — so the entrypoint now bypasses whisperx's `--diarize` and drives the pyannote
+> pipeline directly with a progress hook. CLI surface simplified to a single
+> `--num-speakers` flag. Ctrl+C / `docker stop` now cancel mid-diarization. Testing
+> results below; the whisperx pin is untouched (no whisperx source changes).
+
+---
+
+## Post-implementation iteration — 2026-09-25
+
+All tests against the existing `:small` image with the new files bind-mounted
+(`docker run -v .../entrypoint.sh:/entrypoint.sh -v .../diarize_progress.py:/diarize_progress.py`),
+so no image rebuild was involved except where noted. Hardware: AMD Ryzen AI 7 PRO 350,
+16 threads. Primary test file: `test.mp3` (3-minute two-speaker conversation); subtitle
+regression used `test/we-choose-to-go-to-the-moon.mp4` (36 s).
+
+### Why whisperx's `--diarize` was bypassed
+
+whisperx's `DiarizationPipeline.__call__` invokes the pyannote pipeline **without a
+`hook` kwarg** (verified in both the pinned 3.3.2 sources and the Makefile's 3.4.2
+wheel), so diarization printed nothing beyond a one-line banner. pyannote 3.3.2
+already has a first-class hook API: `SpeakerDiarization.apply(hook=...)` threads it
+into both CPU-heavy phases, which call it per batch with `completed`/`total`
+(`core/inference.py` slide loop; `pipelines/speaker_diarization.py` embeddings loop).
+The fix was therefore in *our* call site, not a whisperx patch: `docker/diarize_progress.py`
+loads the pipeline from the baked cache, passes a stderr-printing hook, then merges
+labels with **whisperx's own `assign_word_speakers`** — merge logic stays upstream's.
+The Dockerfile `COPY`s the script in; the whisperx pin is unchanged.
+
+### Test results
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | Transcript + `--diarize`, 3-min mp3 | ✅ `[SPEAKER_00]:`/`[SPEAKER_01]:` lines, correct attribution, 7 speaker-turn lines |
+| 2 | Progress reporting | ✅ `segmentation: 0%→100% (171 chunks)`, `embeddings: 0%→100% (17 chunks)`, `done` per phase, step banners for `speaker_counting` / `discrete_diarization` |
+| 3 | Subtitle + `--diarize` | ✅ `[SPEAKER_00]:`-prefixed cues, progress reported (`32/32` chunks on the 36 s clip) |
+| 4 | Subtitle without `--diarize` | ✅ Cue timings **identical** to the old image (`00:00:00,064 --> ...` etc. compared directly) — the new inline JSON→SRT path is output-equivalent to the old `--output_format srt` |
+| 5 | Transcript + `--num-speakers 2` | ✅ Exactly two speakers labeled |
+| 6 | Batch-size A/B (below) | ✅ Output byte-identical; batching **slower** on CPU — default kept at 1 |
+| 7 | Cancellation (below) | SIGTERM via `docker stop` mid-segmentation: exit 0.17 s, code 130 |
+| 8 | Syntax | ✅ `bash -n` on all three shell scripts, `py_compile` on the Python |
+
+Known cosmetic quirk (pre-existing, not a regression): SRT cue end times equal their
+start times on both old and new paths — a whisperx `WriteSRT` quirk when word timings
+are present; out of scope.
+
+One mid-test failure was self-inflicted and fixed: the first smoke test ran a
+`DIA_ARGS` array that still contained `--diarize`, which `diarize_progress.py`'
+argparse rejected (`unrecognized arguments: --diarize`). The flag was a leftover from
+the whisperx passthrough; removed.
+
+### Batch-size benchmark (test #6)
+
+Isolated to the diarization phase only (transcribed once in-container, then timed
+`diarize_progress.py` alone), two passes each, alternating order to average machine
+noise. 3-minute file, small model, 16-thread Ryzen:
+
+| Config | Pass 1 | Pass 2 | Average |
+|--------|--------|--------|---------|
+| batch=1 | 66.2 s | 57.4 s | **61.8 s** |
+| batch=8 | 92.6 s | 84.3 s | 88.5 s |
+
+**Batching made diarization ~43% slower on CPU.** The `sys` time (22 s at batch=1 vs
+~110 s at batch=8) shows why: torch already parallelises *within* each chunk's forward
+pass across all threads (user ≫ real even at batch=1), so batching only adds memory
+shuffling. pyannote's `batch_size=1` default is correct for CPU; batching is a GPU
+lever. `--batch-size` remains available on `diarize_progress.py` but defaults to 1,
+with the measured rationale in its help text. Output verified byte-identical between
+the two settings.
+
+Practical CPU performance expectation (small model, this hardware): diarization runs
+at roughly **3× real time** (~62 s per 3 min of audio). `--num-speakers` is the only
+free lever that helps; the real CPU speedup is the deferred pyannote 4.0 /
+community-1 upgrade (ONNX Runtime inference), which needs torch 2.8 + whisperx 3.8.x
+(see COMMUNITY-1-UPGRADE.md).
+
+### CLI simplification: `--num-speakers` replaces min/max
+
+The original plan exposed `--min-speakers`/`--max-speakers`. Both are removed; a
+single `--num-speakers N` maps to pyannote's `num_speakers` (the strongest constraint;
+pyannote ignores min/max when it is set). Feedback: the exact count is the case users
+actually have ("I know how many people are in this recording"), and a range control
+was not earning its place on the CLI. Changes span `docker/entrypoint.sh`,
+`transcribex`, `subtitlex`, `docker/diarize_progress.py` (help text, parsing,
+container-arg forwarding). Re-adding min/max later is a two-line change per script
+if a range need ever re-emerges.
+
+### Cancellation (Ctrl+C) during diarization
+
+Two compounding gaps made Ctrl+C ineffective before: the entrypoint is **PID 1**
+(kernel ignores unhandled SIGINT/SIGTERM for PID 1), and bash defers traps while a
+foreground child runs — while docker's signal proxy only signals PID 1, never the
+python child. Fix:
+
+- `entrypoint.sh`: `run()` helper starts each long step (ffmpeg, whisperx,
+  `diarize_progress.py`) as a background job and `wait`s on it; INT/TERM traps
+  forward the signal to the child (`kill -TERM $FWD_PID`) and `exit 130`. With the
+  child backgrounded, the traps fire immediately instead of after the step ends.
+- `diarize_progress.py`: SIGTERM/SIGINT handler prints `>>Diarizing: cancelled`
+  (closing the `\r` progress line) and exits 130 — torch's inference loop does not
+  unwind on bare signals.
+
+Both interactive Ctrl+C (SIGINT to the process group) and `docker stop` / GUI cancel
+(SIGTERM to PID 1) now reach the Python process within milliseconds.
+
+**Verified live (2026-09-25):** `docker stop` sent mid-segmentation (at 21%,
+36/171 chunks) — the container exited in **0.17 s** with exit code **130**;
+STDERR showed the progress line followed by the run's last flushes. No
+10-second stop timeout, no SIGKILL.
+
+### Files touched in this iteration
+
+| File | Change |
+|------|--------|
+| `docker/diarize_progress.py` | **New.** Direct pyannote driver with progress hook + cancellation handler; label merge via whisperx's `assign_word_speakers`; `--srt` mode reuses whisperx's `WriteSRT` |
+| `docker/entrypoint.sh` | Bypasses `--diarize`; whisperx always emits JSON, post-processed by whisperx's own writers; `run()` signal forwarding; `--num-speakers` passthrough (min/max removed) |
+| `docker/Dockerfile` | `COPY diarize_progress.py /` |
+| `transcribex` / `subtitlex` | `--num-speakers` passthrough (min/max removed) |
+| `.gitignore` | `docker/__pycache__/` |
+
+**All done:** `README.md` updated (2026-09-25) with the real-world performance numbers
+(25-min file, 3 speakers: ~1.5 min transcription+alignment vs ~11 min with diarization)
+and the `--num-speakers` CLI; `make build-small` proven in a real token-authenticated
+build (the same build the user's measured runs came from).
+
+---
 
 **Diagrams** (Mermaid source + rendered PNG in `diagrams/`):
 - [Current architecture](diagrams/current-architecture.png) — the solution as committed today

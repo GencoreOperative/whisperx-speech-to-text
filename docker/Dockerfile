@@ -101,6 +101,11 @@ RUN --mount=type=secret,id=hf_token \
 
 COPY PYANNOTE-NOTICE /etc/PYANNOTE-NOTICE
 
+# Diarization driver: runs the pyannote pipeline directly with a progress
+# hook and merges the labels with whisperx's own assign_word_speakers
+# (whisperx's --diarize path has no progress reporting).
+COPY diarize_progress.py /
+
 # ----------------------------------
 # Entrypoint for argument processing
 # ----------------------------------

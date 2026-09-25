@@ -17,8 +17,8 @@ usage() {
     echo "  -b, --bake           Bake subtitles directly into the video"
     echo "  -m, --model <size>   Specify the Whisper model size (small, medium, large). Default: medium"
     echo "  -d, --diarize        Prefix subtitles with speaker labels ([SPEAKER_00]: ...)"
-    echo "  --min-speakers <n>   With --diarize, lower bound for speaker count"
-    echo "  --max-speakers <n>   With --diarize, upper bound for speaker count"
+    echo "  --num-speakers <n>   With --diarize, exact speaker count. Improves both"
+    echo "                       attribution accuracy and diarization speed"
     echo "  -h, --help           Display this help message"
     echo ""
     echo "Example:"
@@ -33,8 +33,7 @@ TARGET=""
 BAKE=""
 SIZE=""
 DIARIZE=""
-MIN_SPEAKERS=""
-MAX_SPEAKERS=""
+NUM_SPEAKERS=""
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -57,13 +56,8 @@ while [[ "$#" -gt 0 ]]; do
             DIARIZE=1
             shift
             ;;
-        --min-speakers)
-            MIN_SPEAKERS="$2"
-            shift
-            shift
-            ;;
-        --max-speakers)
-            MAX_SPEAKERS="$2"
+        --num-speakers)
+            NUM_SPEAKERS="$2"
             shift
             shift
             ;;
@@ -117,8 +111,7 @@ esac
 CONTAINER_ARGS=(--output $BAKE)
 if [ -n "$DIARIZE" ]; then
     CONTAINER_ARGS+=(-d)
-    [ -n "$MIN_SPEAKERS" ] && CONTAINER_ARGS+=(--min-speakers "$MIN_SPEAKERS")
-    [ -n "$MAX_SPEAKERS" ] && CONTAINER_ARGS+=(--max-speakers "$MAX_SPEAKERS")
+    [ -n "$NUM_SPEAKERS" ] && CONTAINER_ARGS+=(--num-speakers "$NUM_SPEAKERS")
 fi
 
 mkdir -p "$(dirname "$TARGET")"

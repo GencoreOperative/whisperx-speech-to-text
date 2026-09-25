@@ -2,6 +2,29 @@
 
 set -e
 
+# -----------------------------------------------
+# Signal forwarding. The entrypoint is PID 1, which
+# the kernel treats specially: unhandled SIGINT/SIGTERM
+# are ignored. Bash also defers traps while a foreground
+# command runs — and docker's signal proxy only signals
+# PID 1, never its children. Running the long steps via
+# run() (background + wait) makes the traps fire
+# immediately, so Ctrl+C cancels the step instead of
+# stalling until it finishes.
+# -----------------------------------------------
+FWD_PID=""
+cancel() {
+    [ -n "$FWD_PID" ] && kill -TERM "$FWD_PID" 2>/dev/null
+    exit 130
+}
+trap cancel INT TERM
+
+run() {
+    "$@" &
+    FWD_PID=$!
+    wait "$FWD_PID"
+}
+
 HELP_MESSAGE="
 Media is read from STDIN. By default, the transcript is written to STDOUT.
 
@@ -11,7 +34,7 @@ stream instead (hardsubs).
 
 Speaker diarization labels each transcript line with the speaker who said it
 (e.g. [SPEAKER_00]:). The diarization models are baked into this image; no
-token or network access is needed.
+token or network access is needed. Diarization progress is reported to STDERR.
 
 Usage: $0 [--output] [--bake] [--diarize] [--aligned] [--help]
   --output, -o: Trigger subtitle/video mode. Output MP4 is written to STDOUT.
@@ -19,8 +42,8 @@ Usage: $0 [--output] [--bake] [--diarize] [--aligned] [--help]
   --diarize, -d: Assign speaker labels ([SPEAKER_00]: ...) to the output.
   --aligned, -a: With --diarize in transcript mode, run the alignment pass for
                  word-level speaker attribution (slower, finer-grained labels).
-  --min-speakers N: With --diarize, lower bound for speaker count.
-  --max-speakers N: With --diarize, upper bound for speaker count.
+  --num-speakers N: With --diarize, exact speaker count. Constraining the
+                 count improves both attribution accuracy and diarization speed.
   --help,   -h: Display this help message."
 
 usage() {
@@ -32,8 +55,7 @@ VIDEO=false
 BAKE=false
 DIARIZE=""
 ALIGNED=""
-MIN_SPEAKERS=""
-MAX_SPEAKERS=""
+NUM_SPEAKERS=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -49,12 +71,8 @@ while [[ "$#" -gt 0 ]]; do
         --aligned|-a)
             ALIGNED=1
             ;;
-        --min-speakers)
-            MIN_SPEAKERS="$2"
-            shift
-            ;;
-        --max-speakers)
-            MAX_SPEAKERS="$2"
+        --num-speakers)
+            NUM_SPEAKERS="$2"
             shift
             ;;
         --help|-h)
@@ -69,18 +87,16 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # -----------------------------------------------
-# Diarization flags — built once, appended to both
-# whisperx invocations below.
+# Diarization is driven by diarize_progress.py (see
+# the script header for why we bypass --diarize).
 # Models are baked into the image at PYANNOTE_CACHE;
 # HF_HUB_OFFLINE keeps huggingface_hub away from the
-# network and the empty token satisfies the CLI check.
+# network.
 # -----------------------------------------------
 DIA_ARGS=()
 if [ -n "$DIARIZE" ]; then
     export HF_HUB_OFFLINE=1
-    DIA_ARGS=(--diarize --hf_token ""
-              ${MIN_SPEAKERS:+--min_speakers "$MIN_SPEAKERS"}
-              ${MAX_SPEAKERS:+--max_speakers "$MAX_SPEAKERS"})
+    DIA_ARGS=(${NUM_SPEAKERS:+--num-speakers "$NUM_SPEAKERS"})
 fi
 
 # -----------------------------------------------
@@ -100,7 +116,7 @@ fi
 # Convert the provided media to 16kHz mono WAV.
 # -----------------------------------------------
 AUDIO=/tmp/audio.wav
-ffmpeg -i "$INPUT" \
+run ffmpeg -i "$INPUT" \
 	-ar 16000 \
 	-ac 1 \
 	-filter:a dynaudnorm \
@@ -110,51 +126,38 @@ MODEL_SIZE=$(cat /etc/model_size)
 
 # -----------------------------------------------
 # Transcript Mode
-# Skip alignment; output plain text to STDOUT.
-# With --aligned (and --diarize), run the alignment
-# pass and emit JSON so word-level speaker labels can
-# be regrouped into speaker-turn lines below.
+# Output plain text to STDOUT. Whisperx always writes
+# JSON here; diarizing post-processes it with speaker
+# labels, otherwise it is regrouped into plain lines.
+# Default (no --aligned) skips the alignment pass —
+# segment-level speaker labels, cheaper.
 # -----------------------------------------------
 if [ "$VIDEO" == "false" ]; then
 	ALIGN_ARGS=(--no_align)
-	OUT_FORMAT=txt
-	if [ -n "$ALIGNED" ] && [ -n "$DIARIZE" ]; then
+	if [ -n "$DIARIZE" ] && [ -n "$ALIGNED" ]; then
 		ALIGN_ARGS=()
-		OUT_FORMAT=json
 	fi
-	whisperx \
+	run whisperx \
 	  --threads $(nproc) \
 	  --model ${MODEL_SIZE} \
 	  --compute_type int8 \
-	  --output_format ${OUT_FORMAT} \
+	  --output_format json \
 	  --output_dir /tmp \
 	  --language en \
 	  "${ALIGN_ARGS[@]}" \
 	  --print_progress True \
-	  "${DIA_ARGS[@]}" \
 	  "$AUDIO" >&2
-	if [ "$OUT_FORMAT" == "json" ]; then
-		# Regroup word-level speaker labels into speaker-turn lines.
-		# A segment bridging two speakers is split at the boundary.
-		python3 - <<'PYEOF'
-import json
-
-data = json.load(open("/tmp/audio.json"))
-current = None
-line = []
-for seg in data["segments"]:
-    for word in seg.get("words", []):
-        spk = word.get("speaker", seg.get("speaker"))
-        if spk != current and line:
-            print(f"[{current}]: " + " ".join(line))
-            line = []
-        current = spk
-        line.append(word["word"])
-if line and current:
-    print(f"[{current}]: " + " ".join(line))
-PYEOF
+	if [ -n "$DIARIZE" ]; then
+		run python3 /diarize_progress.py \
+			--audio "$AUDIO" \
+			--json /tmp/audio.json \
+			"${DIA_ARGS[@]}"
 	else
-		cat /tmp/audio.txt
+		# Regroup JSON into plain text lines.
+		python3 -c 'import json
+data = json.load(open("/tmp/audio.json"))
+for seg in data["segments"]:
+    print(seg["text"].strip())'
 	fi
 	exit
 fi
@@ -165,15 +168,31 @@ fi
 # mux with the original video and stream to STDOUT
 # as a fragmented MP4 (seekable output not required).
 # -----------------------------------------------
-whisperx \
+run whisperx \
 	--model ${MODEL_SIZE} \
 	--compute_type int8 \
-	--output_format srt \
+	--output_format json \
 	--output_dir /tmp \
 	--language en \
 	--print_progress True \
-	"${DIA_ARGS[@]}" \
 	"$AUDIO" >&2
+
+if [ -n "$DIARIZE" ]; then
+	# Diarize (with progress) and write /tmp/audio.srt.
+	run python3 /diarize_progress.py \
+		--audio "$AUDIO" \
+		--json /tmp/audio.json \
+		--srt \
+		"${DIA_ARGS[@]}"
+else
+	# JSON → SRT with whisperx's own writer.
+	python3 -c 'import json
+from whisperx.utils import get_writer
+result = json.load(open("/tmp/audio.json"))
+result.setdefault("language", "en")
+get_writer("srt", "/tmp")(result, "/tmp/audio.wav", {
+    "highlight_words": False, "max_line_count": None, "max_line_width": None})'
+fi
 
 if [ "$BAKE" == "true" ]; then
 	# Hard subtitles: burn text into the video stream

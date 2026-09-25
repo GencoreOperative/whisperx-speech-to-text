@@ -117,8 +117,8 @@ bash subtitlex --diarize my-interview.mp4
 Diarization adds **speaker identification** to the output: each transcript line (or subtitle)
 is prefixed with the speaker who said it, e.g. `[SPEAKER_00]:`. The labels are arbitrary
 identities assigned by clustering voice characteristics — the tool does not know real names,
-only which stretches of audio sound like the same person. Speaker count can be guided with
-`--min-speakers` / `--max-speakers` when it is known, which improves accuracy.
+only which stretches of audio sound like the same person. When you know the speaker count,
+pass `--num-speakers N` — it improves attribution accuracy and trims the search.
 
 The diarization models are baked into the Docker image at build time. **No HuggingFace
 token, network access, or configuration is needed at run time** — the image works fully
@@ -131,7 +131,7 @@ offline.
 bash transcribex --diarize my-interview.mp3
 
 # Guide the speaker count when it is known
-bash transcribex --diarize --min-speakers 2 --max-speakers 4 panel.mp3
+bash transcribex --diarize --num-speakers 2 panel.mp3
 
 # Word-level attribution (slower): runs the alignment pass and splits transcript
 # lines at speaker hand-offs — use this if attribution looks off in default mode
@@ -145,10 +145,25 @@ only flag needed there.
 
 ## Performance
 
-Diarization runs on CPU. Expect it to add roughly half of the transcription time
-(measured: a 36-second clip took ~25 s with diarization vs ~10 s without, small model);
-`--aligned` adds the alignment pass on top (~35 s for the same clip). Longer recordings
-scale accordingly.
+Transcription alone is fast on CPU — roughly **16× faster than real-time** on the small
+model (a 25-minute recording transcribed and aligned in ~1.5 minutes). Diarization is the
+expensive part: it adds several times the transcription time, because the pyannote models
+run per audio chunk, per speaker. Measured on the small model with 3 speakers
+(`--diarize --aligned --num-speakers 3`, 16-thread Ryzen, CPU-only):
+
+| Recording | Transcribe + align | + Diarization |
+|---|---|---|
+| 25 minutes | ~1.5 min | **~11 min total** |
+
+So budget roughly **2–3× slower than real-time** with diarization on the small model —
+a one-hour meeting may take 2–3 hours with diarization, where the same file without it
+is minutes. Progress is reported on STDERR throughout (`segmentation` and `embeddings`
+phases with live percentages), so a long run is watchable — and Ctrl+C cancels it
+immediately if you need to bail out. The medium and large models multiply transcription
+cost on top of this.
+
+Two levers if it feels too slow: pass `--num-speakers` when the count is known (fewer
+candidate speakers to embed), and skip `--aligned` when segment-level labels suffice.
 
 ## Building the image
 
@@ -187,8 +202,7 @@ Usage: /entrypoint.sh [--output] [--bake] [--diarize] [--aligned] [--help]
   --diarize, -d: Assign speaker labels ([SPEAKER_00]: ...) to the output.
   --aligned, -a: With --diarize in transcript mode, run the alignment pass for
                  word-level speaker attribution (slower, finer-grained labels).
-  --min-speakers N: With --diarize, lower bound for speaker count.
-  --max-speakers N: With --diarize, upper bound for speaker count.
+  --num-speakers N: With --diarize, exact speaker count.
   --help,   -h: Display this help message.
 ```
 
